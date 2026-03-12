@@ -8,7 +8,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// =====================================================
+// Existing exchange / agent enums (preserved + extended)
+// =====================================================
+
 enum AgentStatus {
+  DRAFT
   ACTIVE
   PAUSED
   REVOKED
@@ -26,7 +31,7 @@ enum MandateStatus {
   EXPIRED
 }
 
-// ===== Enums =====
+// ===== Existing core exchange enums =====
 enum OrderSide {
   BUY
   SELL
@@ -49,209 +54,7 @@ enum TradeMode {
   LIVE
 }
 
-// ===== Core exchange =====
-model Market {
-  symbol     String   @id
-  baseAsset  String
-  quoteAsset String
-  tickSize   Decimal  @db.Decimal(18, 8)
-  lotSize    Decimal  @db.Decimal(18, 8)
-  createdAt  DateTime @default(now())
-
-  orders Order[]
-
-  // ✅ inverse relation for Instrument.market
-  instrument Instrument? @relation("MarketInstrument")
-}
-
-model Order {
-  id        BigInt      @id @default(autoincrement()) @db.BigInt
-  symbol    String
-  side      OrderSide
-  price     Decimal     @db.Decimal(18, 8)
-  qty       Decimal     @db.Decimal(18, 8)
-  status    OrderStatus @default(OPEN)
-  createdAt DateTime    @default(now())
-  mode      TradeMode   @default(PAPER)
-
-  // relations
-  market Market @relation(fields: [symbol], references: [symbol])
-  userId String
-  user   User   @relation(fields: [userId], references: [id])
-
-  // trade relations (optional reverse)
-  buys  Trade[] @relation("buyOrder")
-  sells Trade[] @relation("sellOrder")
-
-  @@index([symbol, mode, side, status, price, createdAt])
-}
-
-model Trade {
-  id        BigInt    @id @default(autoincrement()) @db.BigInt
-  symbol    String
-  price     Decimal   @db.Decimal(18, 8)
-  qty       Decimal   @db.Decimal(18, 8)
-  createdAt DateTime  @default(now())
-  mode      TradeMode @default(PAPER)
-
-  // relations
-  buyOrderId  BigInt @db.BigInt
-  sellOrderId BigInt @db.BigInt
-  buyOrder    Order  @relation("buyOrder", fields: [buyOrderId], references: [id])
-  sellOrder   Order  @relation("sellOrder", fields: [sellOrderId], references: [id])
-
-  @@index([symbol, mode, createdAt])
-}
-
-// ===== Identity / KYC / Balances =====
-model User {
-  id           String  @id @default(cuid())
-  email        String  @unique
-  username     String  @unique
-  passwordHash String
-  totpSecret   String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  kyc      Kyc?
-  balances Balance[]
-  orders   Order[]
-
-  // ✅ inverse relations for digital twins + agent assignment
-  digitalTwinProfile   DigitalTwinProfile?
-  twinAgentAssignments TwinAgentAssignment[]
-
-  agents Agent[]
-}
-
-// ===== House agents =====
-model Agent {
-  id      String      @id @default(cuid())
-  userId  String
-  name    String
-  kind    AgentKind
-  version String      @default("1.0")
-  config  Json?
-  status  AgentStatus @default(ACTIVE)
-
-  // Optional: if you later anchor to Aptivio token issuance
-  aptivioTokenId String? @unique
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  assignments TwinAgentAssignment[]
-
-  user     User       @relation(fields: [userId], references: [id])
-  keys     AgentKey[]
-  mandates Mandate[]
-
-  @@index([userId, status])
-}
-
-model AgentKey {
-  id      String @id @default(cuid())
-  agentId String
-
-  // Store public key PEM (Ed25519). Private key NEVER stored.
-  publicKeyPem String
-
-  createdAt DateTime  @default(now())
-  revokedAt DateTime?
-
-  agent Agent @relation(fields: [agentId], references: [id])
-
-  @@index([agentId])
-}
-
-model Mandate {
-  id      String        @id @default(cuid())
-  agentId String
-  status  MandateStatus @default(ACTIVE)
-
-  action MandateAction
-  market String? // null = any market
-
-  // limits are stored in integer "quantums" aligned with ledger (quote asset units)
-  maxNotionalPerDay BigInt @default(0)
-  maxOrdersPerDay   Int    @default(0)
-
-  notBefore DateTime  @default(now())
-  expiresAt DateTime
-  revokedAt DateTime?
-
-  // flexible policy bag: maxQty, tif allowlist, postOnly, maxSlippageBps, priceBandBps, etc
-  constraints Json?
-
-  // optional: store hash of external signed capability token (Aptivio mandate JWT)
-  mandateJwtHash String? @unique
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  agent Agent          @relation(fields: [agentId], references: [id])
-  usage MandateUsage[]
-
-  @@index([agentId, status])
-  @@index([action, market])
-}
-
-model MandateUsage {
-  id           String   @id @default(cuid())
-  mandateId    String
-  day          DateTime // normalized to UTC midnight
-  notionalUsed BigInt   @default(0)
-  ordersPlaced Int      @default(0)
-
-  mandate Mandate @relation(fields: [mandateId], references: [id])
-
-  @@unique([mandateId, day])
-  @@index([day])
-}
-
-// Replay protection (DB version; for production you can replace with Redis TTL)
-model RequestNonce {
-  id        String   @id @default(cuid())
-  agentId   String
-  nonce     String
-  tsMs      BigInt
-  createdAt DateTime @default(now())
-
-  @@unique([agentId, nonce])
-  @@index([createdAt])
-}
-
-model Kyc {
-  id        Int       @id @default(autoincrement())
-  userId    String    @unique
-  legalName String
-  country   String
-  dob       DateTime
-  docType   String
-  docHash   String
-  status    KycStatus @default(PENDING)
-  riskScore Decimal   @default(0) @db.Decimal(38, 18)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @default(now())
-
-  user User @relation(fields: [userId], references: [id])
-}
-
-model Balance {
-  id     Int       @id @default(autoincrement())
-  userId String
-  asset  String
-  amount Decimal   @default(0) @db.Decimal(38, 18)
-  mode   TradeMode @default(PAPER)
-
-  user User @relation(fields: [userId], references: [id])
-
-  @@unique([userId, mode, asset])
-  @@index([userId, mode])
-}
-
-// ===== New enums (bank-grade) =====
+// ===== Existing bank-grade enums =====
 enum AssetKind {
   CRYPTO
   FIAT
@@ -281,13 +84,421 @@ enum AgentKind {
   PORTFOLIO_MANAGER
 }
 
-// ===== Bank-grade asset catalog =====
+// =====================================================
+// New Phase 1 enums (names chosen to avoid conflicts)
+// =====================================================
+
+enum UserStatus {
+  INVITED
+  REGISTERED
+  OTP_VERIFIED
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum RoleCode {
+  USER
+  ADVISOR
+  COMPLIANCE
+  ADMIN
+  AUDITOR
+  PARTNER_ADMIN
+  BANK_OPERATOR
+  SYSTEM_AGENT
+}
+
+enum OtpPurpose {
+  REGISTER
+  VERIFY_EMAIL
+  VERIFY_PHONE
+  LOGIN
+  MFA
+  RESET_PASSWORD
+}
+
+enum OtpChannel {
+  EMAIL
+  SMS
+}
+
+enum MfaFactorType {
+  TOTP
+}
+
+enum MfaFactorStatus {
+  PENDING
+  ACTIVE
+  REVOKED
+}
+
+enum KycCaseStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  UNDER_REVIEW
+  NEEDS_INFO
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum KycDocumentType {
+  PASSPORT
+  NATIONAL_ID
+  DRIVER_LICENSE
+  SELFIE
+  PROOF_OF_ADDRESS
+  BUSINESS_REGISTRATION
+  OTHER
+}
+
+enum KycDecisionCode {
+  APPROVE
+  REJECT
+  REQUEST_INFO
+}
+
+enum PaymentMethodType {
+  BANK_ACCOUNT
+  STRIPE_CUSTOMER
+  PAYPAL_ACCOUNT
+  VENMO_ACCOUNT
+  OTHER
+}
+
+enum PaymentMethodStatus {
+  ADDED
+  PENDING_VERIFICATION
+  VERIFIED
+  RESTRICTED
+  DISABLED
+}
+
+enum WalletType {
+  CUSTODIAL
+  EXTERNAL
+}
+
+enum WalletStatus {
+  CREATED
+  PENDING_VERIFICATION
+  WHITELISTED
+  COOLDOWN
+  ACTIVE
+  FROZEN
+  REVOKED
+}
+
+enum PartnerOrgType {
+  ADVISORY_FIRM
+  BANK
+  ISSUER
+  EMPLOYER
+  OTHER
+}
+
+enum AssessmentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum AptivioProfileStatus {
+  DRAFT
+  ASSESSMENT_PENDING
+  ACTIVE
+  RESTRICTED
+  ARCHIVED
+}
+
+enum AgentCredentialType {
+  PUBLIC_KEY
+  API_KEY
+}
+
+enum AgentCapabilityTier {
+  READ_ONLY
+  RECOMMEND_ONLY
+  PLAN_ONLY
+  EXECUTE_TRADE
+}
+
+enum AgentPrincipalType {
+  DIGITAL_TWIN
+  TRADING_AGENT
+  COMPLIANCE_AGENT
+  ADVISOR_AGENT
+  INTERNAL_MM
+}
+
+// =====================================================
+// Core exchange (preserved)
+// =====================================================
+
+model Market {
+  symbol     String   @id
+  baseAsset  String
+  quoteAsset String
+  tickSize   Decimal  @db.Decimal(18, 8)
+  lotSize    Decimal  @db.Decimal(18, 8)
+  createdAt  DateTime @default(now())
+
+  orders Order[]
+
+  // inverse relation for Instrument.market
+  instrument Instrument? @relation("MarketInstrument")
+}
+
+model Order {
+  id        BigInt      @id @default(autoincrement()) @db.BigInt
+  symbol    String
+  side      OrderSide
+  price     Decimal     @db.Decimal(18, 8)
+  qty       Decimal     @db.Decimal(18, 8)
+  status    OrderStatus @default(OPEN)
+  createdAt DateTime    @default(now())
+  mode      TradeMode   @default(PAPER)
+
+  // relations
+  market Market @relation(fields: [symbol], references: [symbol])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  // trade relations (optional reverse)
+  buys  Trade[] @relation("buyOrder")
+  sells Trade[] @relation("sellOrder")
+
+  @@index([symbol, mode, side, status, price, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Trade {
+  id        BigInt    @id @default(autoincrement()) @db.BigInt
+  symbol    String
+  price     Decimal   @db.Decimal(18, 8)
+  qty       Decimal   @db.Decimal(18, 8)
+  createdAt DateTime  @default(now())
+  mode      TradeMode @default(PAPER)
+
+  buyOrderId  BigInt @db.BigInt
+  sellOrderId BigInt @db.BigInt
+  buyOrder    Order  @relation("buyOrder", fields: [buyOrderId], references: [id])
+  sellOrder   Order  @relation("sellOrder", fields: [sellOrderId], references: [id])
+
+  @@index([symbol, mode, createdAt])
+}
+
+// =====================================================
+// Identity / user (merged: old + new)
+// =====================================================
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  username     String  @unique
+  passwordHash String
+  totpSecret   String?
+
+  // new Phase 1 fields
+  phone           String?    @unique
+  status          UserStatus @default(REGISTERED)
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // existing relations
+  kyc                  Kyc?
+  balances             Balance[]
+  orders               Order[]
+  digitalTwinProfile   DigitalTwinProfile?
+  twinAgentAssignments TwinAgentAssignment[]
+  agents               Agent[]
+
+  // new Phase 1 relations
+  profile        UserProfile?
+  sessions       Session[]
+  otpChallenges  OtpChallenge[]
+  mfaFactors     MfaFactor[]
+  roles          RoleAssignment[]
+  consents       ConsentRecord[]
+  kycCases       KycCase[]
+  paymentMethods PaymentMethod[]
+  wallets        Wallet[]
+  whitelist      WalletWhitelistEntry[]
+  aptivioProfile AptivioProfile?
+  advisorProfile AdvisorProfile?
+  advisorClients AdvisorClientAssignment[] @relation("AdvisorAssignments")
+  clientAdvisors AdvisorClientAssignment[] @relation("ClientAssignments")
+  assessmentRuns AssessmentRun[]
+
+  @@index([status])
+}
+
+// =====================================================
+// Existing house agents (preserved + enriched)
+// =====================================================
+
+model Agent {
+  id     String @id @default(cuid())
+  userId String
+  name   String
+
+  // new high-level classification
+  principalType  AgentPrincipalType?
+  capabilityTier AgentCapabilityTier @default(READ_ONLY)
+
+  // existing strategy/runtime classification
+  kind    AgentKind
+  version String      @default("1.0")
+  config  Json?
+  status  AgentStatus @default(ACTIVE)
+
+  // Optional: if you later anchor to Aptivio token issuance
+  aptivioTokenId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments TwinAgentAssignment[]
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  keys     AgentKey[]
+  mandates Mandate[]
+
+  @@index([userId, status])
+  @@index([principalType, kind, status])
+}
+
+model AgentKey {
+  id      String @id @default(cuid())
+  agentId String
+
+  credentialType AgentCredentialType @default(PUBLIC_KEY)
+
+  // existing public-key path
+  publicKeyPem String?
+
+  // optional API-key path
+  keyPrefix String?
+  keyHash   String? @unique
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime?
+  revokedAt DateTime?
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+  @@index([agentId, credentialType])
+}
+
+model Mandate {
+  id      String        @id @default(cuid())
+  agentId String
+  status  MandateStatus @default(ACTIVE)
+
+  action MandateAction
+  market String? // null = any market
+
+  // limits stored in integer quantums aligned with ledger
+  maxNotionalPerDay BigInt @default(0)
+  maxOrdersPerDay   Int    @default(0)
+
+  notBefore DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  // flexible policy bag: maxQty, tif allowlist, postOnly, maxSlippageBps, priceBandBps, etc
+  constraints Json?
+
+  // optional: hash of external signed capability token
+  mandateJwtHash String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agent Agent          @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  usage MandateUsage[]
+
+  @@index([agentId, status])
+  @@index([action, market])
+}
+
+model MandateUsage {
+  id           String   @id @default(cuid())
+  mandateId    String
+  day          DateTime // normalized to UTC midnight
+  notionalUsed BigInt   @default(0)
+  ordersPlaced Int      @default(0)
+
+  mandate Mandate @relation(fields: [mandateId], references: [id], onDelete: Cascade)
+
+  @@unique([mandateId, day])
+  @@index([day])
+}
+
+// Replay protection (DB version; later may move to Redis TTL)
+model RequestNonce {
+  id        String   @id @default(cuid())
+  agentId   String
+  nonce     String
+  tsMs      BigInt
+  createdAt DateTime @default(now())
+
+  @@unique([agentId, nonce])
+  @@index([createdAt])
+}
+
+// =====================================================
+// Existing summary KYC + balances (preserved)
+// =====================================================
+
+model Kyc {
+  id        Int       @id @default(autoincrement())
+  userId    String    @unique
+  legalName String
+  country   String
+  dob       DateTime
+  docType   String
+  docHash   String
+  status    KycStatus @default(PENDING)
+  riskScore Decimal   @default(0) @db.Decimal(38, 18)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+}
+
+model Balance {
+  id     Int       @id @default(autoincrement())
+  userId String
+  asset  String
+  amount Decimal   @default(0) @db.Decimal(38, 18)
+  mode   TradeMode @default(PAPER)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mode, asset])
+  @@index([userId, mode])
+}
+
+// =====================================================
+// Existing asset / instrument catalog (preserved)
+// =====================================================
+
 model Asset {
   id               String    @id @default(cuid())
   code             String    @unique // BTC, USD, XAU, RVAI
   kind             AssetKind
-  venue            String? // BINANCE, COINBASE, OANDA, NASDAQ (optional)
-  country          String? // optional
+  venue            String? // BINANCE, COINBASE, OANDA, NASDAQ
+  country          String?
   createdAt        DateTime  @default(now())
   issuerControlled Boolean   @default(false)
 
@@ -295,17 +506,15 @@ model Asset {
   quoteInstruments Instrument[] @relation("quoteAsset")
 }
 
-// ===== Instrument/Market catalog (future-proof) =====
-// Keeps a mapping to legacy Market.symbol for now.
 model Instrument {
   id            String  @id @default(cuid())
   displaySymbol String  @unique // BTC-USD, RVAI-USD, XAU-USD
-  sourceSymbol  String? // e.g. BINANCE:BTCUSDT, OANDA:XAU_USD, NASDAQ:AAPL
+  sourceSymbol  String? // BINANCE:BTCUSDT, OANDA:XAU_USD, NASDAQ:AAPL
 
   baseAssetId  String
   quoteAssetId String
 
-  // link to your current Market.symbol if you want (optional)
+  // link to current Market.symbol if you want
   legacySymbol String? @unique
 
   createdAt DateTime @default(now())
@@ -313,11 +522,13 @@ model Instrument {
   baseAsset  Asset @relation("baseAsset", fields: [baseAssetId], references: [id])
   quoteAsset Asset @relation("quoteAsset", fields: [quoteAssetId], references: [id])
 
-  // ✅ relation name matches Market.instrument
   market Market? @relation("MarketInstrument", fields: [legacySymbol], references: [symbol])
 }
 
-// ===== Digital Twin profile =====
+// =====================================================
+// Existing digital twin trading profile (preserved)
+// =====================================================
+
 model DigitalTwinProfile {
   id     Int      @id @default(autoincrement())
   userId String   @unique
@@ -328,7 +539,7 @@ model DigitalTwinProfile {
   maxOrdersPerDay  Int      @default(50)
   preferredSymbols String[] @default([])
 
-  // full plan as JSON (unique per twin)
+  // full plan as JSON
   plan Json
 
   createdAt DateTime @default(now())
@@ -349,4 +560,407 @@ model TwinAgentAssignment {
   @@unique([userId, agentId, role])
   @@index([userId])
   @@index([agentId])
+}
+
+// =====================================================
+// New Phase 1 identity / onboarding
+// =====================================================
+
+model UserProfile {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  firstName     String
+  lastName      String
+  fullName      String?
+  dateOfBirth   DateTime?
+  country       String?
+  residency     String?
+  nationality   String?
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  state         String?
+  postalCode    String?
+  employerName  String?
+  sourceChannel String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id               String    @id @default(cuid())
+  userId           String
+  refreshTokenHash String
+  ipAddress        String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model OtpChallenge {
+  id           String     @id @default(cuid())
+  userId       String?
+  purpose      OtpPurpose
+  channel      OtpChannel
+  target       String
+  codeHash     String
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attemptCount Int        @default(0)
+  createdAt    DateTime   @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([target, purpose, expiresAt])
+}
+
+model MfaFactor {
+  id              String          @id @default(cuid())
+  userId          String
+  type            MfaFactorType
+  status          MfaFactorStatus @default(PENDING)
+  label           String?
+  secretEncrypted String
+  activatedAt     DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+}
+
+model RoleAssignment {
+  id               String   @id @default(cuid())
+  userId           String
+  roleCode         RoleCode
+  scopeType        String?
+  scopeId          String?
+  assignedByUserId String?
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, roleCode])
+}
+
+model ConsentRecord {
+  id          String   @id @default(cuid())
+  userId      String
+  consentType String
+  version     String
+  acceptedAt  DateTime @default(now())
+  metadata    Json?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, consentType, version])
+}
+
+// =====================================================
+// New richer KYC workflow (coexists with legacy Kyc)
+// =====================================================
+
+model KycCase {
+  id             String        @id @default(cuid())
+  userId         String
+  status         KycCaseStatus @default(NOT_STARTED)
+  providerRef    String?
+  notes          String?
+  startedAt      DateTime      @default(now())
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewerUserId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents  KycDocument[]
+  decisions  KycDecision[]
+  screenings ScreeningResult[]
+
+  @@index([userId, status])
+}
+
+model KycDocument {
+  id         String          @id @default(cuid())
+  kycCaseId  String
+  docType    KycDocumentType
+  fileKey    String
+  fileName   String?
+  mimeType   String?
+  uploadedAt DateTime        @default(now())
+  metadata   Json?
+
+  kycCase KycCase @relation(fields: [kycCaseId], references: [id], onDelete: Cascade)
+
+  @@index([kycCaseId, docType])
+}
+
+model KycDecision {
+  id             String          @id @default(cuid())
+  kycCaseId      String
+  decision       KycDecisionCode
+  reasonCode     String?
+  notes          String?
+  reviewerUserId String
+  createdAt      DateTime        @default(now())
+
+  kycCase KycCase @relation(fields: [kycCaseId], references: [id], onDelete: Cascade)
+
+  @@index([kycCaseId, createdAt])
+}
+
+model ScreeningResult {
+  id            String   @id @default(cuid())
+  kycCaseId     String
+  screeningType String
+  result        String
+  score         Decimal? @db.Decimal(10, 4)
+  payload       Json?
+  createdAt     DateTime @default(now())
+
+  kycCase KycCase @relation(fields: [kycCaseId], references: [id], onDelete: Cascade)
+
+  @@index([kycCaseId, screeningType])
+}
+
+// =====================================================
+// Payments / bank methods / wallets
+// =====================================================
+
+model PaymentMethod {
+  id        String              @id @default(cuid())
+  userId    String
+  type      PaymentMethodType
+  status    PaymentMethodStatus @default(ADDED)
+  label     String?
+  metadata  Json?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bankAccount BankAccount?
+
+  @@index([userId, status, type])
+}
+
+model BankAccount {
+  id                  String    @id @default(cuid())
+  paymentMethodId     String    @unique
+  accountHolderName   String
+  bankName            String
+  country             String?
+  currency            String?
+  maskedAccountNumber String?
+  maskedRoutingNumber String?
+  ibanMasked          String?
+  swiftBicMasked      String?
+  verifiedAt          DateTime?
+  metadata            Json?
+
+  paymentMethod PaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+}
+
+model Wallet {
+  id          String       @id @default(cuid())
+  userId      String
+  type        WalletType
+  status      WalletStatus @default(CREATED)
+  chain       String?
+  address     String?
+  label       String?
+  isCustodial Boolean      @default(false)
+  verifiedAt  DateTime?
+  activatedAt DateTime?
+  metadata    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, status])
+}
+
+model WalletWhitelistEntry {
+  id         String       @id @default(cuid())
+  userId     String
+  chain      String
+  address    String
+  label      String?
+  status     WalletStatus @default(PENDING_VERIFICATION)
+  approvedAt DateTime?
+  createdAt  DateTime     @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chain, address])
+  @@index([userId, status])
+}
+
+// =====================================================
+// Partners / advisors
+// =====================================================
+
+model PartnerOrganization {
+  id        String         @id @default(cuid())
+  name      String
+  type      PartnerOrgType
+  country   String?
+  metadata  Json?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  advisors AdvisorProfile[]
+
+  @@index([type, country])
+}
+
+model AdvisorProfile {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  organizationId String?
+  licenseNumber  String?
+  status         String?
+  specialties    Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user         User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization PartnerOrganization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+}
+
+model AdvisorClientAssignment {
+  id            String   @id @default(cuid())
+  advisorUserId String
+  clientUserId  String
+  status        String
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  advisor User @relation("AdvisorAssignments", fields: [advisorUserId], references: [id], onDelete: Cascade)
+  client  User @relation("ClientAssignments", fields: [clientUserId], references: [id], onDelete: Cascade)
+
+  @@unique([advisorUserId, clientUserId])
+  @@index([clientUserId, status])
+}
+
+// =====================================================
+// Aptivio catalog / profiles / identity
+// =====================================================
+
+model AptitudeDefinition {
+  id         String   @id @default(cuid())
+  slug       String   @unique
+  name       String
+  category   String
+  orderIndex Int
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  scores AssessmentAptitudeScore[]
+
+  @@index([category, orderIndex])
+}
+
+model AptivioProfile {
+  id                  String               @id @default(cuid())
+  userId              String               @unique
+  status              AptivioProfileStatus @default(DRAFT)
+  score               Int?
+  aptitudeVector      Json?
+  twinJson            Json?
+  skillPassportJson   Json?
+  professionalismJson Json?
+  trajectoryJson      Json?
+  riskProfileJson     Json?
+  version             String               @default("v1.0.0")
+  lastAssessedAt      DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assessments AssessmentRun[]
+  aptivioId   AptivioIdentity?
+}
+
+model AssessmentRun {
+  id               String              @id @default(cuid())
+  userId           String
+  aptivioProfileId String
+  assessmentType   String
+  status           AssessmentRunStatus @default(PENDING)
+  rawResultJson    Json?
+  normalizedJson   Json?
+  startedAt        DateTime            @default(now())
+  completedAt      DateTime?
+  createdAt        DateTime            @default(now())
+
+  user           User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aptivioProfile AptivioProfile            @relation(fields: [aptivioProfileId], references: [id], onDelete: Cascade)
+  scores         AssessmentAptitudeScore[]
+
+  @@index([aptivioProfileId, status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model AssessmentAptitudeScore {
+  id                   String    @id @default(cuid())
+  assessmentRunId      String
+  aptitudeDefinitionId String
+  score                Int
+  confidence           Decimal?  @db.Decimal(5, 4)
+  weightForRole        Decimal?  @db.Decimal(5, 4)
+  lastAssessedAt       DateTime?
+  sourcesJson          Json?
+
+  assessmentRun      AssessmentRun      @relation(fields: [assessmentRunId], references: [id], onDelete: Cascade)
+  aptitudeDefinition AptitudeDefinition @relation(fields: [aptitudeDefinitionId], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentRunId, aptitudeDefinitionId])
+  @@index([aptitudeDefinitionId])
+}
+
+model AptivioIdentity {
+  id                    String   @id @default(cuid())
+  aptivioProfileId      String   @unique
+  passportNumber        String   @unique
+  status                String
+  issuedAt              DateTime @default(now())
+  claimsJson            Json?
+  tokenEntitlementsJson Json?
+
+  aptivioProfile AptivioProfile @relation(fields: [aptivioProfileId], references: [id], onDelete: Cascade)
+}
+
+// =====================================================
+// Audit log
+// =====================================================
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  actorType    String
+  actorId      String?
+  subjectType  String?
+  subjectId    String?
+  action       String
+  resourceType String?
+  resourceId   String?
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([actorType, actorId])
+  @@index([resourceType, resourceId])
+  @@index([action, createdAt])
 }

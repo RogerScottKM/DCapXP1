@@ -1,7 +1,7 @@
 {
   "name": "dcapx",
   "private": true,
-  "packageManager": "pnpm@10.30.3+sha256.ff0a72140f6a6d66c0b284f6c9560aff605518e28c29aeac25fb262b74331588",
+  "packageManager": "pnpm@10.32.1+sha256.9b943b94bc8f55efb993aad8e44b538e6b091e60a9e4a944dcde869855f233e3",
   "workspaces": [
     "apps/*",
     "packages/*"

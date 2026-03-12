@@ -1,1 +1,0 @@
-{"version":1,"functions":{"/api/admin/kyc/pending":{},"/api/faucet":{},"/api/kyc":{},"/api/markets":{},"/api/orders":{},"/api/stream/mode/[mode]/[symbol]":{},"/api/stream/symbol/[symbol]":{},"/candles/[symbol]":{},"/wapi/stream/[symbol]":{},"/admin/dashboard":{},"/api/candles/[symbol]":{},"/markets/RVAI-USD":{},"/markets/[symbol]":{}}}

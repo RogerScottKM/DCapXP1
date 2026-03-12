@@ -103,9 +103,9 @@ async function fetchCoinbaseMid(productId) {
         throw new Error(`coinbase ticker ${productId} -> ${r.status}`);
     }
     const j = await r.json();
-    const bid = Number(j.bid);
-    const ask = Number(j.ask);
-    const price = Number(j.price);
+    const bid = Number(j?.bid ?? 0);
+    const ask = Number(j?.ask ?? 0);
+    const price = Number(j?.price ?? 0);
     const mid = Number.isFinite(bid) && Number.isFinite(ask) && bid > 0 && ask > 0
         ? (bid + ask) / 2
         : price;

@@ -102,6 +102,9 @@ export function enforceMandate(requiredAction: "TRADE" | "WITHDRAW" | "TRANSFER"
       const activeKey = agent.keys[0];
       if (!activeKey) return res.status(403).json({ error: "No active agent key" });
 
+      if (!activeKey?.publicKeyPem) {
+         return res.status(403).json({ error: "Agent key missing public key" });
+      }
       const okSig = verifyEd25519(activeKey.publicKeyPem, msg, sig);
       if (!okSig) {
         return res.status(403).json({ error: "Invalid agent signature" });

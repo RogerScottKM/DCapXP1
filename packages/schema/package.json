@@ -1,0 +1,26 @@
+{
+  "name": "@repo/schema",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "main": "./dist/ui.js",
+  "types": "./dist/ui.d.ts",
+  "files": ["dist"],
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "exports": {
+    "./ui": {
+      "types": "./dist/ui.d.ts",
+      "import": "./dist/ui.js",
+      "require": "./dist/ui.js",
+      "default": "./dist/ui.js"
+    }
+  }
+}

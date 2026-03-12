@@ -1,0 +1,78 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: dcapx-api
+    command: ["bash","-lc","pnpm prisma generate && pnpm prisma migrate deploy && node dist/server.js"]
+    environment:
+      PORT: "4010"
+      DATABASE_URL: "postgresql://dcapx:dcapx@pg:5432/dcapx?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      ADMIN_KEY: "change-me-now-please"
+      ENABLE_BOT_FARM: "1"
+    depends_on:
+      pg:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4010:4010"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      # Uses Node 18's built-in fetch, so no curl needed
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: dcapx-web
+    environment:
+      API_INTERNAL_URL: "http://api:4010"
+      NODE_ENV: "production"
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  pg:
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  redis:
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+

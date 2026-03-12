@@ -1,0 +1,69 @@
+// apps/web/app/api/candles/[symbol]/route.ts
+import { NextRequest } from 'next/server';
+
+type Trade = {
+  id: string;
+  symbol: string;
+  price: string;
+  qty: string;
+  buyOrderId: string;
+  sellOrderId: string;
+  createdAt: string;
+};
+
+export async function GET(req: NextRequest, { params }: { params: { symbol: string } }) {
+  try {
+    const symbol = decodeURIComponent(params.symbol).toUpperCase();
+    const url = new URL(req.url);
+    const intervalMin = Number(url.searchParams.get('interval') ?? '1'); // 1-minute default
+
+    // Pull recent trades from existing app route
+    const r = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/trades/${encodeURIComponent(symbol)}`, {
+      cache: 'no-store',
+    }).catch(() => null);
+
+    if (!r || !r.ok) {
+      // direct to API as fallback
+      const alt = await fetch(`http://127.0.0.1:4010/v1/trades/${encodeURIComponent(symbol)}`, { cache: 'no-store' });
+      const j2 = await alt.json();
+      return Response.json({ ok: true, candles: toCandles(j2.trades ?? [], intervalMin) });
+    }
+
+    const j = await r.json();
+    const trades: Trade[] = j.trades ?? [];
+    return Response.json({ ok: true, candles: toCandles(trades, intervalMin) });
+  } catch (e: any) {
+    return Response.json({ ok: false, error: String(e?.message ?? e) }, { status: 500 });
+  }
+}
+
+function toCandles(trades: Trade[], intervalMin: number) {
+  if (!Array.isArray(trades) || trades.length === 0) return [];
+
+  // oldest -> newest
+  const sorted = [...trades].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  const bucketMs = intervalMin * 60 * 1000;
+  const buckets = new Map<number, { o: number; h: number; l: number; c: number; v: number }>();
+
+  for (const t of sorted) {
+    const ts = Math.floor(new Date(t.createdAt).getTime() / bucketMs) * bucketMs;
+    const price = Number(t.price);
+    const qty = Number(t.qty);
+    const b = buckets.get(ts);
+    if (!b) {
+      buckets.set(ts, { o: price, h: price, l: price, c: price, v: qty });
+    } else {
+      b.h = Math.max(b.h, price);
+      b.l = Math.min(b.l, price);
+      b.c = price;
+      b.v += qty;
+    }
+  }
+
+  return [...buckets.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([t, b]) => ({ t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
+}

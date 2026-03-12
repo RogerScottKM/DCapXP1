@@ -1,0 +1,34 @@
+version: "3.9"
+services:
+  pg:
+    image: postgres:16
+    container_name: dcapx-pg
+    environment:
+      POSTGRES_USER: dcapx
+      POSTGRES_PASSWORD: dcapx
+      POSTGRES_DB: dcapx
+    ports:
+      - "5445:5432"          # NOTE: host 5445 -> container 5432 (avoids clashing with old 5432)
+    volumes:
+      - dcapx_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U dcapx -d dcapx"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: dcapx-redis
+    ports:
+      - "6380:6379"          # also on a non-standard host port to avoid clashes
+    volumes:
+      - dcapx_redis:/data
+
+volumes:
+  dcapx_pg:
+  dcapx_redis:
+
+networks:
+  default:
+    name: dcapx_net

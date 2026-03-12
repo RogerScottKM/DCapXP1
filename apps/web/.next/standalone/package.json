@@ -1,0 +1,20 @@
+{
+  "name": "dcapx",
+  "private": true,
+  "packageManager": "pnpm@10.30.3+sha256.ff0a72140f6a6d66c0b284f6c9560aff605518e28c29aeac25fb262b74331588",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "pnpm --filter api dev",
+    "dev": "concurrently -n web,api -c green,cyan \"pnpm dev:web\" \"pnpm dev:api\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  },
+  "dependencies": {
+    "next-themes": "^0.4.6"
+  }
+}

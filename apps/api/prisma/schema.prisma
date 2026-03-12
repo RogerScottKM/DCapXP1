@@ -1,0 +1,352 @@
+// apps/api/prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AgentStatus {
+  ACTIVE
+  PAUSED
+  REVOKED
+}
+
+enum MandateAction {
+  TRADE
+  WITHDRAW
+  TRANSFER
+}
+
+enum MandateStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+// ===== Enums =====
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  OPEN
+  FILLED
+  CANCELLED
+}
+
+enum KycStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TradeMode {
+  PAPER
+  LIVE
+}
+
+// ===== Core exchange =====
+model Market {
+  symbol     String   @id
+  baseAsset  String
+  quoteAsset String
+  tickSize   Decimal  @db.Decimal(18, 8)
+  lotSize    Decimal  @db.Decimal(18, 8)
+  createdAt  DateTime @default(now())
+
+  orders Order[]
+
+  // ✅ inverse relation for Instrument.market
+  instrument Instrument? @relation("MarketInstrument")
+}
+
+model Order {
+  id        BigInt      @id @default(autoincrement()) @db.BigInt
+  symbol    String
+  side      OrderSide
+  price     Decimal     @db.Decimal(18, 8)
+  qty       Decimal     @db.Decimal(18, 8)
+  status    OrderStatus @default(OPEN)
+  createdAt DateTime    @default(now())
+  mode      TradeMode   @default(PAPER)
+
+  // relations
+  market Market @relation(fields: [symbol], references: [symbol])
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  // trade relations (optional reverse)
+  buys  Trade[] @relation("buyOrder")
+  sells Trade[] @relation("sellOrder")
+
+  @@index([symbol, mode, side, status, price, createdAt])
+}
+
+model Trade {
+  id        BigInt    @id @default(autoincrement()) @db.BigInt
+  symbol    String
+  price     Decimal   @db.Decimal(18, 8)
+  qty       Decimal   @db.Decimal(18, 8)
+  createdAt DateTime  @default(now())
+  mode      TradeMode @default(PAPER)
+
+  // relations
+  buyOrderId  BigInt @db.BigInt
+  sellOrderId BigInt @db.BigInt
+  buyOrder    Order  @relation("buyOrder", fields: [buyOrderId], references: [id])
+  sellOrder   Order  @relation("sellOrder", fields: [sellOrderId], references: [id])
+
+  @@index([symbol, mode, createdAt])
+}
+
+// ===== Identity / KYC / Balances =====
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  username     String  @unique
+  passwordHash String
+  totpSecret   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  kyc      Kyc?
+  balances Balance[]
+  orders   Order[]
+
+  // ✅ inverse relations for digital twins + agent assignment
+  digitalTwinProfile   DigitalTwinProfile?
+  twinAgentAssignments TwinAgentAssignment[]
+
+  agents Agent[]
+}
+
+// ===== House agents =====
+model Agent {
+  id      String      @id @default(cuid())
+  userId  String
+  name    String
+  kind    AgentKind
+  version String      @default("1.0")
+  config  Json?
+  status  AgentStatus @default(ACTIVE)
+
+  // Optional: if you later anchor to Aptivio token issuance
+  aptivioTokenId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments TwinAgentAssignment[]
+
+  user     User       @relation(fields: [userId], references: [id])
+  keys     AgentKey[]
+  mandates Mandate[]
+
+  @@index([userId, status])
+}
+
+model AgentKey {
+  id      String @id @default(cuid())
+  agentId String
+
+  // Store public key PEM (Ed25519). Private key NEVER stored.
+  publicKeyPem String
+
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  agent Agent @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+}
+
+model Mandate {
+  id      String        @id @default(cuid())
+  agentId String
+  status  MandateStatus @default(ACTIVE)
+
+  action MandateAction
+  market String? // null = any market
+
+  // limits are stored in integer "quantums" aligned with ledger (quote asset units)
+  maxNotionalPerDay BigInt @default(0)
+  maxOrdersPerDay   Int    @default(0)
+
+  notBefore DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  // flexible policy bag: maxQty, tif allowlist, postOnly, maxSlippageBps, priceBandBps, etc
+  constraints Json?
+
+  // optional: store hash of external signed capability token (Aptivio mandate JWT)
+  mandateJwtHash String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  agent Agent          @relation(fields: [agentId], references: [id])
+  usage MandateUsage[]
+
+  @@index([agentId, status])
+  @@index([action, market])
+}
+
+model MandateUsage {
+  id           String   @id @default(cuid())
+  mandateId    String
+  day          DateTime // normalized to UTC midnight
+  notionalUsed BigInt   @default(0)
+  ordersPlaced Int      @default(0)
+
+  mandate Mandate @relation(fields: [mandateId], references: [id])
+
+  @@unique([mandateId, day])
+  @@index([day])
+}
+
+// Replay protection (DB version; for production you can replace with Redis TTL)
+model RequestNonce {
+  id        String   @id @default(cuid())
+  agentId   String
+  nonce     String
+  tsMs      BigInt
+  createdAt DateTime @default(now())
+
+  @@unique([agentId, nonce])
+  @@index([createdAt])
+}
+
+model Kyc {
+  id        Int       @id @default(autoincrement())
+  userId    String    @unique
+  legalName String
+  country   String
+  dob       DateTime
+  docType   String
+  docHash   String
+  status    KycStatus @default(PENDING)
+  riskScore Decimal   @default(0) @db.Decimal(38, 18)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Balance {
+  id     Int       @id @default(autoincrement())
+  userId String
+  asset  String
+  amount Decimal   @default(0) @db.Decimal(38, 18)
+  mode   TradeMode @default(PAPER)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, mode, asset])
+  @@index([userId, mode])
+}
+
+// ===== New enums (bank-grade) =====
+enum AssetKind {
+  CRYPTO
+  FIAT
+  FX
+  EQUITY
+  COMMODITY
+  TOKEN
+}
+
+enum TwinTier {
+  WHALE
+  TRADER
+  SCALPER
+  LEARNER
+  NEWBIE
+}
+
+enum AgentKind {
+  RISK_GUARD
+  MARKET_MAKER
+  SCALPER
+  MEAN_REVERT
+  TREND_FOLLOW
+  DCA
+  NEWS_SENTIMENT
+  ARBITRAGE
+  PORTFOLIO_MANAGER
+}
+
+// ===== Bank-grade asset catalog =====
+model Asset {
+  id               String    @id @default(cuid())
+  code             String    @unique // BTC, USD, XAU, RVAI
+  kind             AssetKind
+  venue            String? // BINANCE, COINBASE, OANDA, NASDAQ (optional)
+  country          String? // optional
+  createdAt        DateTime  @default(now())
+  issuerControlled Boolean   @default(false)
+
+  baseInstruments  Instrument[] @relation("baseAsset")
+  quoteInstruments Instrument[] @relation("quoteAsset")
+}
+
+// ===== Instrument/Market catalog (future-proof) =====
+// Keeps a mapping to legacy Market.symbol for now.
+model Instrument {
+  id            String  @id @default(cuid())
+  displaySymbol String  @unique // BTC-USD, RVAI-USD, XAU-USD
+  sourceSymbol  String? // e.g. BINANCE:BTCUSDT, OANDA:XAU_USD, NASDAQ:AAPL
+
+  baseAssetId  String
+  quoteAssetId String
+
+  // link to your current Market.symbol if you want (optional)
+  legacySymbol String? @unique
+
+  createdAt DateTime @default(now())
+
+  baseAsset  Asset @relation("baseAsset", fields: [baseAssetId], references: [id])
+  quoteAsset Asset @relation("quoteAsset", fields: [quoteAssetId], references: [id])
+
+  // ✅ relation name matches Market.instrument
+  market Market? @relation("MarketInstrument", fields: [legacySymbol], references: [symbol])
+}
+
+// ===== Digital Twin profile =====
+model DigitalTwinProfile {
+  id     Int      @id @default(autoincrement())
+  userId String   @unique
+  tier   TwinTier
+
+  // trading personality knobs
+  riskPct          Decimal  @default(0.01) @db.Decimal(10, 6)
+  maxOrdersPerDay  Int      @default(50)
+  preferredSymbols String[] @default([])
+
+  // full plan as JSON (unique per twin)
+  plan Json
+
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model TwinAgentAssignment {
+  id        Int      @id @default(autoincrement())
+  userId    String
+  agentId   String
+  role      String // "primary", "risk", "copilot"
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, agentId, role])
+  @@index([userId])
+  @@index([agentId])
+}

@@ -1,0 +1,1 @@
+import crypto from "crypto"; export function generateInvitationToken() { return crypto.randomBytes(32).toString("hex"); } export function hashInvitationToken(rawToken: string) { return crypto.createHash("sha256").update(rawToken).digest("hex"); }

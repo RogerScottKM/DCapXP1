@@ -1,0 +1,1 @@
+import type { Request, Response, NextFunction } from "express"; import { onboardingService } from "./onboarding.service"; export async function getMyOnboardingStatus(req: Request, res: Response, next: NextFunction) { try { const userId = req.auth!.userId; const result = await onboardingService.getMyOnboardingStatus(userId); res.json(result); } catch (error) { next(error); } }

@@ -1,0 +1,2 @@
+export interface RoleAssignmentLike { roleCode: string; scopeType: "GLOBAL" | "PARTNER_ORG" | "CLIENT" | "ADVISOR_BOOK"; scopeId: string | null; }
+export function hasScopedRole(assignments: RoleAssignmentLike[], roleCode: string, scopeType: RoleAssignmentLike["scopeType"], scopeId?: string): boolean { return assignments.some((a) => { if (a.roleCode !== roleCode) return false; if (a.scopeType !== scopeType) return false; if (scopeType === "GLOBAL") return true; return a.scopeId === (scopeId ?? null); }); }

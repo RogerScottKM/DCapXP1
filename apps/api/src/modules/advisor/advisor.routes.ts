@@ -1,0 +1,1 @@
+import { Router } from "express"; import { requireAuth } from "../../middleware/require-auth"; import { getAdvisorClientAptivioSummary } from "./advisor.controller"; const router = Router(); router.get("/advisor/clients/:clientId/aptivio-summary", requireAuth, getAdvisorClientAptivioSummary); export default router;

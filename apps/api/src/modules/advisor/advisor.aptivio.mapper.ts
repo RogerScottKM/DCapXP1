@@ -1,0 +1,1 @@
+import type { AdvisorAptivioSummaryResponse } from "@dcapx/contracts"; export const ADVISOR_APTIVIO_DISCLAIMER: AdvisorAptivioSummaryResponse["disclaimer"] = { title: "Aptivio Adviser View Disclaimer", body: "This summary is generated from client-provided information..." };

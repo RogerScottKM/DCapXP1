@@ -73,21 +73,19 @@ const BANDS: Record<string, BandCfg> = {
 
     tickOverride: Number(process.env.RVAI_TICK ?? 0.0001),
 
-    // More exciting within the full band
-    driftPct: 0.0034,
-    wickTicks: 42,
+    // Much calmer intrabar behavior, still active enough to feel alive
+    driftPct: 0.00135,
+    wickTicks: 6,
+    pullToAnchor: 0.065,
+    anchorNoisePct: 0.0035,
+    jumpProb: 0.006,
+    jumpTicksMin: 6,
+    jumpTicksMax: 22,
 
-    pullToAnchor: 0.03,
-    anchorNoisePct: 0.0105,
+    regimeMinSec: 24,
+    regimeMaxSec: 110,
 
-    jumpProb: 0.035,
-    jumpTicksMin: 60,
-    jumpTicksMax: 260,
-
-    regimeMinSec: 18,
-    regimeMaxSec: 80,
-
-    forceTradeEveryMs: 1600,
+    forceTradeEveryMs: 2400,
 
     openLevels: 4,
     openLimit: 160,
@@ -127,6 +125,67 @@ const ORACLE_PRODUCTS: Record<string, string> = {
 };
 
 const oracle: Partial<Record<string, OracleQuote>> = {};
+
+type BotFarmSymbolStatus = {
+  symbol: string;
+  regime?: Regime;
+  mid?: number;
+  anchor?: number;
+  volPct?: number;
+  momentum?: number;
+  lastLoopTs?: number;
+  lastBookRefreshTs?: number;
+  lastSyntheticTradeTs?: number;
+  oracle?: OracleQuote;
+};
+
+const botFarmStartedAt = Date.now();
+const botFarmStatus: Record<string, BotFarmSymbolStatus> = {};
+
+function patchBotFarmStatus(symbol: string, patch: Partial<BotFarmSymbolStatus>) {
+  const prev = botFarmStatus[symbol];
+
+  botFarmStatus[symbol] = {
+    ...(prev ?? {}),
+    ...patch,
+    symbol,
+  };
+}
+
+export function getBotFarmStatusSnapshot() {
+  const now = Date.now();
+
+  return {
+    ok: true,
+    startedAt: botFarmStartedAt,
+    now,
+    symbols: Object.fromEntries(
+      Object.entries(botFarmStatus).map(([symbol, s]) => [
+        symbol,
+        {
+          ...s,
+          oracle: s.oracle
+            ? {
+                ...s.oracle,
+                ageMs: now - s.oracle.ts,
+                fresh: now - s.oracle.ts < 20_000,
+              }
+            : undefined,
+          lastLoopAgeMs:
+            typeof s.lastLoopTs === "number" ? now - s.lastLoopTs : null,
+          lastBookRefreshAgeMs:
+            typeof s.lastBookRefreshTs === "number"
+              ? now - s.lastBookRefreshTs
+              : null,
+          lastSyntheticTradeAgeMs:
+            typeof s.lastSyntheticTradeTs === "number"
+              ? now - s.lastSyntheticTradeTs
+              : null,
+        },
+      ])
+    ),
+  };
+}
 
 let cachedUserIds: string[] = [];
 let cachedUsersAt = 0;
@@ -253,8 +312,14 @@ async function fetchCoinbaseMid(productId: string): Promise<OracleQuote> {
 async function primeOracles() {
   for (const [symbol, productId] of Object.entries(ORACLE_PRODUCTS)) {
     try {
-      oracle[symbol] = await fetchCoinbaseMid(productId);
-      console.log(`[botFarm] ${symbol} oracle primed`, oracle[symbol]);
+      const q = await fetchCoinbaseMid(productId);
+      oracle[symbol] = q;
+
+      patchBotFarmStatus(symbol, {
+        oracle: q,
+      });
+
+      console.log(`[botFarm] ${symbol} oracle primed`, q);
     } catch (e) {
       console.error(`[botFarm] ${symbol} oracle prime failed`, e);
     }
@@ -266,7 +331,12 @@ async function startOracleWatcher(symbol: string, productId: string) {
 
   while (true) {
     try {
-      oracle[symbol] = await fetchCoinbaseMid(productId);
+      const q = await fetchCoinbaseMid(productId);
+      oracle[symbol] = q;
+
+      patchBotFarmStatus(symbol, {
+        oracle: q,
+      });
     } catch (e) {
       console.error(`[botFarm] house oracle watcher ${symbol}`, e);
     }
@@ -553,24 +623,47 @@ async function emitPaperTrade(
   const live = oracle[symbol];
   const liveFresh = !!live && Date.now() - live.ts < 10_000;
 
-  const wick =
-    cfg.wickTicks *
-    (regime === "calm" ? 0.55 : regime === "active" ? 1.0 : 1.45);
+  const isRvai = symbol === "RVAI-USD";
 
-  let pxNum =
-    symbol in ORACLE_PRODUCTS && liveFresh
-      ? live!.mid + randn() * tick * wick
-      : mid + randn() * tick * wick;
+const wick =
+  isRvai
+    ? cfg.wickTicks *
+      (regime === "calm" ? 0.16 : regime === "active" ? 0.24 : 0.34)
+    : cfg.wickTicks *
+      (regime === "calm" ? 0.55 : regime === "active" ? 1.0 : 1.45);
 
-  const wickOutP =
-    regime === "panic" ? 0.18 : regime === "active" ? 0.10 : 0.06;
+let pxNum =
+  symbol in ORACLE_PRODUCTS && liveFresh
+    ? live!.mid + randn() * tick * wick
+    : mid + randn() * tick * wick;
 
-  if (Math.random() < wickOutP) {
-    pxNum += randn() * tick * wick * 2.2;
-  }
+const wickOutP = isRvai
+  ? regime === "panic"
+    ? 0.018
+    : regime === "active"
+    ? 0.010
+    : 0.004
+  : regime === "panic"
+  ? 0.18
+  : regime === "active"
+  ? 0.10
+  : 0.06;
 
-  pxNum = clamp(pxNum, lo, hi);
-  const px = pxNum.toFixed(8);
+if (Math.random() < wickOutP) {
+  pxNum += randn() * tick * wick * (isRvai ? 0.55 : 2.2);
+}
+
+if (isRvai) {
+  // Pull prints back toward mid so candles don't look like giant synthetic needles
+  pxNum = mid + (pxNum - mid) * 0.68;
+
+  // Hard cap single-trade excursion from current mid
+  const maxTradeDeviation = 0.0028;
+  pxNum = clamp(pxNum, mid - maxTradeDeviation, mid + maxTradeDeviation);
+}
+
+pxNum = clamp(pxNum, lo, hi);
+const px = pxNum.toFixed(8);
 
   const [buy, sell] = await prisma.$transaction([
     prisma.order.create({
@@ -696,11 +789,19 @@ async function startSymbolWorker(symbol: string, tickDb: number) {
         momCap
       );
 
-      // Mid update
-      let mid = s.mid;
-      mid = mid * (1 + randn() * s.volPct);
-      mid = mid + (s.anchor - mid) * cfg.pullToAnchor;
-      mid = mid + s.momentum;
+        // Mid update
+        const prevMid = s.mid;
+        let mid = s.mid;
+        mid = mid * (1 + randn() * s.volPct);
+        mid = mid + (s.anchor - mid) * cfg.pullToAnchor;
+        mid = mid + s.momentum;
+
+        if (symbol === "RVAI-USD") {
+          // Prevent huge intrabar traversals inside one candle bucket
+          const maxStepAbs = 0.0022; // ~0.22 cents per loop
+          mid = clamp(mid, prevMid - maxStepAbs, prevMid + maxStepAbs);
+        }
+
 
       // Rare jump shocks
       {
@@ -716,14 +817,18 @@ async function startSymbolWorker(symbol: string, tickDb: number) {
           s.anchor = clamp(s.anchor + sign * range * 0.06, lo, hi);
         }
       }
+        // Keep oracle-backed synth reasonably close to live
+        if (symbol in ORACLE_PRODUCTS && liveFresh) {
+          mid = mid * 0.88 + live!.mid * 0.12;
+        }
 
-      // Keep oracle-backed synth reasonably close to live
-      if (symbol in ORACLE_PRODUCTS && liveFresh) {
-        mid = mid * 0.88 + live!.mid * 0.12;
-      }
+        if (symbol === "RVAI-USD") {
+          const rvaiSoftCenter = (lo + hi) / 2;
+          mid = mid + (rvaiSoftCenter - mid) * 0.015;
+        }
 
-      mid = clamp(mid, lo, hi);
-      s.mid = mid;
+        mid = clamp(mid, lo, hi);
+        s.mid = mid;
 
       // Periodic cleanup
       if (tNow - s.lastCleanupAt > 12_000) {
@@ -733,6 +838,10 @@ async function startSymbolWorker(symbol: string, tickDb: number) {
 
       // Build fresh open depth
       await placeOpenDepth(symbol, cfg, mid, lo, hi, tick, userIds, s.regime);
+
+      patchBotFarmStatus(symbol, {
+        lastBookRefreshTs: Date.now(),
+      });
 
       // Keep tape alive
       const mustTrade = tNow - s.lastTradeAt > cfg.forceTradeEveryMs;
@@ -750,10 +859,18 @@ async function startSymbolWorker(symbol: string, tickDb: number) {
           s.regime
         );
 
-        if (typeof pxNum === "number") {
-          s.mid = clamp(s.mid * 0.75 + pxNum * 0.25, lo, hi);
-          s.lastTradeAt = Date.now();
-        }
+  if (typeof pxNum === "number") {
+  const tradeTs = Date.now();
+
+  s.mid = clamp(s.mid * 0.75 + pxNum * 0.25, lo, hi);
+  s.lastTradeAt = tradeTs;
+
+  patchBotFarmStatus(symbol, {
+    mid: s.mid,
+    lastSyntheticTradeTs: tradeTs,
+  });
+ }
+
       }
     } catch (e: any) {
       console.error(`[botFarm] paper synthesizer ${symbol}`, e);

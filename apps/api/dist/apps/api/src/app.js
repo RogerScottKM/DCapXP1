@@ -4,12 +4,21 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
+const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
 const onboarding_routes_1 = __importDefault(require("./modules/onboarding/onboarding.routes"));
 const advisor_routes_1 = __importDefault(require("./modules/advisor/advisor.routes"));
 // import invitationsRoutes from "./modules/invitations/invitations.routes";
 const uploads_routes_1 = __importDefault(require("./modules/uploads/uploads.routes"));
 const consents_routes_1 = __importDefault(require("./modules/consents/consents.routes"));
 const app = (0, express_1.default)();
+app.use((0, cors_1.default)({
+    origin: [
+        "http://localhost:3002",
+        "http://localhost:53002",
+    ],
+    credentials: true,
+}));
 app.use(express_1.default.json());
 // health check
 app.get("/health", (_req, res) => {
@@ -27,6 +36,7 @@ app.use("/api", advisor_routes_1.default);
 // app.use("/api", invitationsRoutes);
 app.use("/api", uploads_routes_1.default);
 app.use("/api", consents_routes_1.default);
+app.use("/api", auth_routes_1.default);
 // Global error handler (uses our ApiError)
 app.use((err, req, res, next) => {
     const status = err.statusCode || 500;

@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import authRoutes from "./modules/auth/auth.routes";
 import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import advisorRoutes from "./modules/advisor/advisor.routes";
 // import invitationsRoutes from "./modules/invitations/invitations.routes";
@@ -37,6 +38,7 @@ app.use("/api", advisorRoutes);
 // app.use("/api", invitationsRoutes);
 app.use("/api", uploadsRoutes);
 app.use("/api", consentsRoutes);
+app.use("/api", authRoutes);
 
 // Global error handler (uses our ApiError)
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

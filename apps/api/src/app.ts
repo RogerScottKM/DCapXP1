@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import advisorRoutes from "./modules/advisor/advisor.routes";
 // import invitationsRoutes from "./modules/invitations/invitations.routes";
@@ -6,6 +7,12 @@ import uploadsRoutes from "./modules/uploads/uploads.routes";
 import consentsRoutes from "./modules/consents/consents.routes";
 
 const app = express();
+app.use(
+  cors({
+    origin: ["http://localhost:3002"],
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // health check

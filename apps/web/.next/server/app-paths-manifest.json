@@ -1,10 +1,1 @@
-{
-  "/api/orderbook/[symbol]/route": "app/api/orderbook/[symbol]/route.js",
-  "/api/positions/route": "app/api/positions/route.js",
-  "/api/open-orders/[symbol]/route": "app/api/open-orders/[symbol]/route.js",
-  "/page": "app/page.js",
-  "/markets/RVAI-USD/page": "app/markets/RVAI-USD/page.js",
-  "/markets/[symbol]/page": "app/markets/[symbol]/page.js",
-  "/api/trades/[symbol]/route": "app/api/trades/[symbol]/route.js",
-  "/api/candles/[symbol]/route": "app/api/candles/[symbol]/route.js"
-}
+{}

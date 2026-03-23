@@ -2,5 +2,6 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/app/onboarding": "pages/app/onboarding.js"
+  "/app/onboarding": "pages/app/onboarding.js",
+  "/app/consents": "pages/app/consents.js"
 }

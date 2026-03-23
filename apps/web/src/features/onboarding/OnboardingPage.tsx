@@ -19,11 +19,15 @@ export default function OnboardingPage() {
         if (isMounted) {
           setData(result);
         }
-      } catch (error: any) {
+      }catch (error: any) {
         if (isMounted) {
-          setErrorMessage(error?.error?.message || "Failed to load onboarding status.");
-        }
-      } finally {
+    setErrorMessage(
+      error?.error?.message ||
+      error?.message ||
+      "Failed to load onboarding status."
+      );
+     } 
+    } finally {
         if (isMounted) {
           setIsLoading(false);
         }

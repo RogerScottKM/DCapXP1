@@ -9,7 +9,10 @@ import consentsRoutes from "./modules/consents/consents.routes";
 const app = express();
 app.use(
   cors({
-    origin: ["http://localhost:3002"],
+    origin: [
+      "http://localhost:3002",
+      "http://localhost:53002",    
+    ],
     credentials: true,
   })
 );

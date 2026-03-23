@@ -11,6 +11,16 @@ const uploads_routes_1 = __importDefault(require("./modules/uploads/uploads.rout
 const consents_routes_1 = __importDefault(require("./modules/consents/consents.routes"));
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
+// health check
+app.get("/health", (_req, res) => {
+    res.json({ ok: true });
+});
+// mount feature routes
+app.use(onboarding_routes_1.default);
+app.use(advisor_routes_1.default);
+app.use(consents_routes_1.default);
+app.use(uploads_routes_1.default);
+// app.use(invitationsRoutes);
 // Everything under /api so frontend calls match
 app.use("/api", onboarding_routes_1.default);
 app.use("/api", advisor_routes_1.default);

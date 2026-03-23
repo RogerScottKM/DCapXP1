@@ -8,6 +8,19 @@ import consentsRoutes from "./modules/consents/consents.routes";
 const app = express();
 app.use(express.json());
 
+// health check
+app.get("/health", (_req, res) => {
+  res.json({ ok: true });
+});
+
+// mount feature routes
+app.use(onboardingRoutes);
+app.use(advisorRoutes);
+app.use(consentsRoutes);
+app.use(uploadsRoutes);
+// app.use(invitationsRoutes);
+
+
 // Everything under /api so frontend calls match
 app.use("/api", onboardingRoutes);
 app.use("/api", advisorRoutes);

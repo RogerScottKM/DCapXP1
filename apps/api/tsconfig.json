@@ -15,8 +15,5 @@
       "@dcapx/contracts/*": ["../../packages/contracts/src/*"]
     }
   },
-  "include": ["src", "src/**/*.ts", "src/**/*.d.ts"],
-  "exclude": [
-    "src/modules/invitations/**/*"
-   ]
+  "include": ["src", "src/**/*.ts", "src/**/*.d.ts"]
 }

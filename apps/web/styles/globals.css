@@ -2,5 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light dark; }
-body { @apply bg-slate-950 text-slate-100; }
+html {
+  min-height: 100%;
+}
+
+body {
+  @apply min-h-screen bg-white text-slate-900 transition-colors duration-200 dark:bg-slate-950 dark:text-slate-100;
+}
+
+* {
+  @apply border-slate-200 dark:border-slate-800;
+}

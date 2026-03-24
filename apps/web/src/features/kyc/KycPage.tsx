@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { ApiErrorResponse } from "@dcapx/contracts";
 import { completeKycUpload, presignUpload } from "../../lib/api/uploads";
-import { createMyKycCase, getMyKycCase, type MyKycCaseResponse } from "../../lib/api/kyc";
+import {
+  createMyKycCase,
+  getMyKycCase,
+  type MyKycCaseResponse,
+} from "../../lib/api/kyc";
+import PortalShell from "../ui/PortalShell";
 
 const DOCUMENT_TYPE_OPTIONS = [
   "PASSPORT",
@@ -24,6 +29,39 @@ function formatUtc(utc: string | null | undefined) {
     minute: "2-digit",
     hour12: true,
   }).format(date);
+}
+
+function statusPill(status: string | null | undefined) {
+  const value = status || "UNKNOWN";
+
+  const classes =
+    value === "APPROVED"
+      ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"
+      : value === "UNDER_REVIEW" || value === "SUBMITTED"
+      ? "border-cyan-300 bg-cyan-50 text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-200"
+      : value === "REJECTED" || value === "NEEDS_INFO"
+      ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+      : "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200";
+
+  return (
+    <span className={`rounded-full border px-3 py-1 text-xs font-medium ${classes}`}>
+      {value}
+    </span>
+  );
+}
+
+function messageBox(kind: "error" | "success", message: string) {
+  const classes =
+    kind === "error"
+      ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
+      : "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200";
+
+  return (
+    <div className={`rounded-2xl border px-4 py-3 text-sm ${classes}`}>
+      <span className="font-medium">{kind === "error" ? "Error:" : "Success:"}</span>{" "}
+      {message}
+    </div>
+  );
 }
 
 export default function KycPage() {
@@ -158,177 +196,201 @@ export default function KycPage() {
   }, [kycCase]);
 
   return (
-    <main style={{ maxWidth: 960, margin: "0 auto", padding: 24 }}>
-      <h1>KYC Verification</h1>
-      <p>
-        Create your KYC case, upload identity documents, and track your review status.
-      </p>
+    <PortalShell
+      title="KYC Verification"
+      description="Create your KYC case, upload identity documents, and track document review status through a controlled verification workflow."
+    >
+      <div className="grid gap-6">
+        {errorMessage ? messageBox("error", errorMessage) : null}
+        {successMessage ? messageBox("success", successMessage) : null}
 
-      {errorMessage ? (
-        <div
-          style={{
-            border: "1px solid #f0b4b4",
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 16,
-          }}
-        >
-          <strong>Error:</strong> {errorMessage}
-        </div>
-      ) : null}
+        {isLoading ? (
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Loading KYC case...
+            </p>
+          </div>
+        ) : null}
 
-      {successMessage ? (
-        <div
-          style={{
-            border: "1px solid #b7e3c0",
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 16,
-          }}
-        >
-          <strong>Success:</strong> {successMessage}
-        </div>
-      ) : null}
-
-      {isLoading ? <p>Loading KYC case...</p> : null}
-
-      {!isLoading && !hasCase ? (
-        <section
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            padding: 16,
-            marginBottom: 24,
-          }}
-        >
-          <h2 style={{ marginTop: 0 }}>No KYC Case Yet</h2>
-          <p>Create your KYC case to begin document submission.</p>
-          <button
-            type="button"
-            onClick={handleCreateCase}
-            disabled={isCreatingCase}
-            style={{
-              padding: "10px 16px",
-              borderRadius: 8,
-              border: "1px solid #222",
-              cursor: isCreatingCase ? "not-allowed" : "pointer",
-            }}
-          >
-            {isCreatingCase ? "Creating..." : "Create KYC Case"}
-          </button>
-        </section>
-      ) : null}
-
-      {!isLoading && hasCase && kycCase ? (
-        <>
-          <section
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 16,
-              marginBottom: 24,
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Case Summary</h2>
-            <p><strong>Case ID:</strong> {kycCase.id}</p>
-            <p><strong>Status:</strong> {kycCase.status}</p>
-            <p><strong>Created:</strong> {formatUtc(kycCase.createdAtUtc)}</p>
-            <p><strong>Updated:</strong> {formatUtc(kycCase.updatedAtUtc)}</p>
-            {kycCase.notes ? (
-              <p><strong>Notes:</strong> {kycCase.notes}</p>
-            ) : null}
+        {!isLoading && !hasCase ? (
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <h2 className="text-xl font-semibold tracking-tight">No KYC Case Yet</h2>
+            <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+              Create your KYC case to begin document submission.
+            </p>
+            <button
+              type="button"
+              onClick={handleCreateCase}
+              disabled={isCreatingCase}
+              className="mt-5 rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-5 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200"
+            >
+              {isCreatingCase ? "Creating..." : "Create KYC Case"}
+            </button>
           </section>
+        ) : null}
 
-          <section
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 16,
-              marginBottom: 24,
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Upload Document</h2>
-
-            <form onSubmit={handleUpload} style={{ display: "grid", gap: 16 }}>
-              <div>
-                <label htmlFor="documentType">Document Type</label>
-                <select
-                  id="documentType"
-                  value={documentType}
-                  onChange={(e) => setDocumentType(e.target.value)}
-                  disabled={isUploading}
-                  style={{ display: "block", marginTop: 6, padding: 10, minWidth: 260 }}
-                >
-                  {DOCUMENT_TYPE_OPTIONS.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label htmlFor="kycFile">Choose File</label>
-                <input
-                  id="kycFile"
-                  type="file"
-                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
-                  disabled={isUploading}
-                  style={{ display: "block", marginTop: 6 }}
-                />
-              </div>
-
-              {selectedFile ? (
+        {!isLoading && hasCase && kycCase ? (
+          <>
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <strong>Selected file:</strong> {selectedFile.name} ({selectedFile.size} bytes)
+                  <h2 className="text-xl font-semibold tracking-tight">Case Summary</h2>
+                  <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">
+                    Case ID: {kycCase.id}
+                  </p>
+                </div>
+
+                <div>{statusPill(kycCase.status)}</div>
+              </div>
+
+              <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Created
+                  </div>
+                  <div className="mt-2 text-sm font-medium">
+                    {formatUtc(kycCase.createdAtUtc)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Updated
+                  </div>
+                  <div className="mt-2 text-sm font-medium">
+                    {formatUtc(kycCase.updatedAtUtc)}
+                  </div>
+                </div>
+              </div>
+
+              {kycCase.notes ? (
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
+                  <span className="font-medium">Notes:</span> {kycCase.notes}
                 </div>
               ) : null}
+            </section>
 
-              <button
-                type="submit"
-                disabled={isUploading || !selectedFile}
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: 8,
-                  border: "1px solid #222",
-                  cursor: isUploading || !selectedFile ? "not-allowed" : "pointer",
-                  width: "fit-content",
-                }}
-              >
-                {isUploading ? "Uploading..." : "Upload Document"}
-              </button>
-            </form>
-          </section>
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+              <h2 className="text-xl font-semibold tracking-tight">Upload Document</h2>
 
-          <section
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 16,
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Uploaded Documents</h2>
+              <form onSubmit={handleUpload} className="mt-6 grid gap-5">
+                <div>
+                  <label
+                    htmlFor="documentType"
+                    className="block text-sm font-medium text-slate-700 dark:text-slate-200"
+                  >
+                    Document Type
+                  </label>
+                  <select
+                    id="documentType"
+                    value={documentType}
+                    onChange={(e) => setDocumentType(e.target.value)}
+                    disabled={isUploading}
+                    className="mt-2 w-full max-w-sm rounded-2xl border border-slate-300 bg-white px-4 py-3 text-slate-900 outline-none focus:border-cyan-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                  >
+                    {DOCUMENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-            {sortedDocuments.length === 0 ? (
-              <p>No documents uploaded yet.</p>
-            ) : (
-              <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
-                {sortedDocuments.map((doc) => (
-                  <li key={doc.id} style={{ marginBottom: 12 }}>
-                    <div><strong>{doc.docType}</strong></div>
-                    <div>File: {doc.fileName || "—"}</div>
-                    <div>MIME: {doc.mimeType || "—"}</div>
-                    <div>Size: {doc.sizeBytes ?? "—"}</div>
-                    <div>Upload status: {doc.uploadStatus || "—"}</div>
-                    <div>Uploaded: {formatUtc(doc.uploadedAtUtc)}</div>
-                    <div>Reviewed: {formatUtc(doc.reviewedAtUtc)}</div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </>
-      ) : null}
-    </main>
+                <div>
+                  <label
+                    htmlFor="kycFile"
+                    className="block text-sm font-medium text-slate-700 dark:text-slate-200"
+                  >
+                    Choose File
+                  </label>
+                  <input
+                    id="kycFile"
+                    type="file"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    disabled={isUploading}
+                    className="mt-2 block text-sm text-slate-700 file:mr-4 file:rounded-xl file:border file:border-slate-300 file:bg-white file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-slate-50 dark:text-slate-300 dark:file:border-slate-700 dark:file:bg-slate-900 dark:hover:file:bg-slate-800"
+                  />
+                </div>
+
+                {selectedFile ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950/60 dark:text-slate-300">
+                    <span className="font-medium">Selected file:</span>{" "}
+                    {selectedFile.name} ({selectedFile.size} bytes)
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  disabled={isUploading || !selectedFile}
+                  className="w-fit rounded-2xl border border-cyan-400/40 bg-cyan-400/10 px-5 py-3 text-sm font-medium text-cyan-700 transition hover:bg-cyan-400/20 disabled:cursor-not-allowed disabled:opacity-50 dark:text-cyan-200"
+                >
+                  {isUploading ? "Uploading..." : "Upload Document"}
+                </button>
+              </form>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+              <h2 className="text-xl font-semibold tracking-tight">Uploaded Documents</h2>
+
+              {sortedDocuments.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+                  No documents uploaded yet.
+                </p>
+              ) : (
+                <div className="mt-6 grid gap-4">
+                  {sortedDocuments.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/60"
+                    >
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="text-base font-semibold">{doc.docType}</div>
+                          <div className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                            {doc.fileName || "—"}
+                          </div>
+                        </div>
+
+                        {statusPill(doc.uploadStatus)}
+                      </div>
+
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            MIME
+                          </div>
+                          <div className="mt-1 text-sm">{doc.mimeType || "—"}</div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Size
+                          </div>
+                          <div className="mt-1 text-sm">{doc.sizeBytes ?? "—"}</div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Uploaded
+                          </div>
+                          <div className="mt-1 text-sm">{formatUtc(doc.uploadedAtUtc)}</div>
+                        </div>
+
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Reviewed
+                          </div>
+                          <div className="mt-1 text-sm">{formatUtc(doc.reviewedAtUtc)}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        ) : null}
+      </div>
+    </PortalShell>
   );
 }

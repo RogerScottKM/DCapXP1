@@ -4,7 +4,7 @@ import kycRoutes from "./modules/kyc/kyc.routes";
 import authRoutes from "./modules/auth/auth.routes";
 import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import advisorRoutes from "./modules/advisor/advisor.routes";
-// import invitationsRoutes from "./modules/invitations/invitations.routes";
+import invitationsRoutes from "./modules/invitations/invitations.routes";
 import uploadsRoutes from "./modules/uploads/uploads.routes";
 import consentsRoutes from "./modules/consents/consents.routes";
 
@@ -30,7 +30,7 @@ app.use(onboardingRoutes);
 app.use(advisorRoutes);
 app.use(consentsRoutes);
 app.use(uploadsRoutes);
-// app.use(invitationsRoutes);
+app.use(invitationsRoutes);
 
 
 // Everything under /api so frontend calls match

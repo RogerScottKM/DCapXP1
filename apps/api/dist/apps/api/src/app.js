@@ -9,7 +9,7 @@ const kyc_routes_1 = __importDefault(require("./modules/kyc/kyc.routes"));
 const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
 const onboarding_routes_1 = __importDefault(require("./modules/onboarding/onboarding.routes"));
 const advisor_routes_1 = __importDefault(require("./modules/advisor/advisor.routes"));
-// import invitationsRoutes from "./modules/invitations/invitations.routes";
+const invitations_routes_1 = __importDefault(require("./modules/invitations/invitations.routes"));
 const uploads_routes_1 = __importDefault(require("./modules/uploads/uploads.routes"));
 const consents_routes_1 = __importDefault(require("./modules/consents/consents.routes"));
 const app = (0, express_1.default)();
@@ -30,7 +30,7 @@ app.use(onboarding_routes_1.default);
 app.use(advisor_routes_1.default);
 app.use(consents_routes_1.default);
 app.use(uploads_routes_1.default);
-// app.use(invitationsRoutes);
+app.use(invitations_routes_1.default);
 // Everything under /api so frontend calls match
 app.use("/api", onboarding_routes_1.default);
 app.use("/api", advisor_routes_1.default);

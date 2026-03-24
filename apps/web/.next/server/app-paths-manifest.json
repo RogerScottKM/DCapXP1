@@ -1,1 +1,10 @@
-{}
+{
+  "/dashboard/page": "app/dashboard/page.js",
+  "/api/positions/route": "app/api/positions/route.js",
+  "/api/open-orders/[symbol]/route": "app/api/open-orders/[symbol]/route.js",
+  "/api/orderbook/[symbol]/route": "app/api/orderbook/[symbol]/route.js",
+  "/exchange/page": "app/exchange/page.js",
+  "/markets/[symbol]/page": "app/markets/[symbol]/page.js",
+  "/foundation/page": "app/foundation/page.js",
+  "/markets/RVAI-USD/page": "app/markets/RVAI-USD/page.js"
+}

@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
+const kyc_routes_1 = __importDefault(require("./modules/kyc/kyc.routes"));
 const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
 const onboarding_routes_1 = __importDefault(require("./modules/onboarding/onboarding.routes"));
 const advisor_routes_1 = __importDefault(require("./modules/advisor/advisor.routes"));
@@ -37,6 +38,7 @@ app.use("/api", advisor_routes_1.default);
 app.use("/api", uploads_routes_1.default);
 app.use("/api", consents_routes_1.default);
 app.use("/api", auth_routes_1.default);
+app.use("/api", kyc_routes_1.default);
 // Global error handler (uses our ApiError)
 app.use((err, req, res, next) => {
     const status = err.statusCode || 500;

@@ -4,9 +4,10 @@ const config: Config = {
   content: [
     "./app/**/*.{ts,tsx}",
     "./components/**/*.{ts,tsx}",
-    "./pages/**/*.{ts,tsx}",
+    "./pages/**/*.{js,ts,jsx,tsx}",
+    "./src/**/*.{js,ts,jsx,tsx}",
     // if you share UI across packages, include their paths too:
-    "../../packages/**/*.{ts,tsx}",
+    // "../../packages/**/*.{ts,tsx}",
   ],
 
   // ✅ enable class-based dark mode

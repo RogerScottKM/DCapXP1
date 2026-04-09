@@ -17,6 +17,12 @@ const argon2_1 = __importDefault(require("argon2"));
 const crypto_1 = __importDefault(require("crypto"));
 exports.SESSION_COOKIE_NAME = "dcapx_session";
 const SESSION_TTL_DAYS = 30;
+function getCookieAttributes(expiresAt) {
+    const isProduction = process.env.NODE_ENV === "production";
+    const sameSite = process.env.SESSION_COOKIE_SAMESITE ?? "Lax";
+    const maxAge = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
+    return `Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}; ${isProduction ? "Secure; " : ""}Expires=${expiresAt.toUTCString()}`;
+}
 function createSessionSecret() {
     return crypto_1.default.randomBytes(32).toString("hex");
 }
@@ -69,10 +75,9 @@ function getSessionExpiryDate() {
     return d;
 }
 function setSessionCookie(res, sessionCookieValue, expiresAt) {
-    const isProduction = process.env.NODE_ENV === "production";
-    res.setHeader("Set-Cookie", `${exports.SESSION_COOKIE_NAME}=${encodeURIComponent(sessionCookieValue)}; Path=/; HttpOnly; SameSite=Lax; ${isProduction ? "Secure; " : ""}Expires=${expiresAt.toUTCString()}`);
+    res.setHeader("Set-Cookie", `${exports.SESSION_COOKIE_NAME}=${encodeURIComponent(sessionCookieValue)}; ${getCookieAttributes(expiresAt)}`);
 }
 function clearSessionCookie(res) {
-    const isProduction = process.env.NODE_ENV === "production";
-    res.setHeader("Set-Cookie", `${exports.SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; ${isProduction ? "Secure; " : ""}Expires=Thu, 01 Jan 1970 00:00:00 GMT`);
+    const expiresAt = new Date(0);
+    res.setHeader("Set-Cookie", `${exports.SESSION_COOKIE_NAME}=; ${getCookieAttributes(expiresAt)}`);
 }

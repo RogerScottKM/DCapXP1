@@ -66,7 +66,7 @@ class VerificationService {
         const code = (0, verification_utils_1.generateOtpCode)();
         const destinationHash = (0, verification_utils_1.hashForStorage)(email);
         const codeHash = (0, verification_utils_1.hashForStorage)(code);
-        const challenge = await prisma_1.prisma.verificationChallenge.create({
+        await prisma_1.prisma.verificationChallenge.create({
             data: {
                 userId: user.id,
                 channel: "EMAIL",
@@ -87,7 +87,6 @@ class VerificationService {
         return {
             ok: true,
             message: "If an account exists, a verification email has been sent.",
-            challengeId: challenge.id,
         };
     }
     async confirmEmailVerification(emailInput, codeInput) {
@@ -169,7 +168,7 @@ class VerificationService {
         const token = (0, verification_utils_1.generateOpaqueToken)();
         const destinationHash = (0, verification_utils_1.hashForStorage)(email);
         const codeHash = (0, verification_utils_1.hashForStorage)(token);
-        const challenge = await prisma_1.prisma.verificationChallenge.create({
+        await prisma_1.prisma.verificationChallenge.create({
             data: {
                 userId: user.id,
                 channel: "EMAIL",
@@ -191,7 +190,6 @@ class VerificationService {
         return {
             ok: true,
             message: "If an account exists, a reset email has been sent.",
-            challengeId: challenge.id,
         };
     }
     async resetPassword(tokenInput, password) {
@@ -228,6 +226,15 @@ class VerificationService {
             prisma_1.prisma.user.update({
                 where: { id: challenge.userId },
                 data: { passwordHash: newPasswordHash },
+            }),
+            prisma_1.prisma.session.updateMany({
+                where: {
+                    userId: challenge.userId,
+                    revokedAt: null,
+                },
+                data: {
+                    revokedAt: now,
+                },
             }),
         ]);
         return { ok: true, message: "Password reset successfully." };

@@ -2,8 +2,10 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const verification_service_1 = require("./verification.service");
+const simple_rate_limit_1 = require("../../middleware/simple-rate-limit");
 const router = (0, express_1.Router)();
-router.post("/auth/verify-email/request", async (req, res) => {
+const publicLimiter = (0, simple_rate_limit_1.simpleRateLimit)({ keyPrefix: "verification:public", windowMs: 10 * 60 * 1000, max: 10 });
+router.post("/auth/verify-email/request", publicLimiter, async (req, res) => {
     try {
         const email = String(req.body?.email ?? "").trim();
         if (!email) {
@@ -23,7 +25,7 @@ router.post("/auth/verify-email/request", async (req, res) => {
         });
     }
 });
-router.post("/auth/verify-email/confirm", async (req, res) => {
+router.post("/auth/verify-email/confirm", publicLimiter, async (req, res) => {
     try {
         const email = String(req.body?.email ?? "").trim();
         const code = String(req.body?.code ?? "").trim();
@@ -44,7 +46,7 @@ router.post("/auth/verify-email/confirm", async (req, res) => {
         });
     }
 });
-router.post("/auth/password/forgot", async (req, res) => {
+router.post("/auth/password/forgot", publicLimiter, async (req, res) => {
     try {
         const email = String(req.body?.email ?? "").trim();
         if (!email) {
@@ -64,7 +66,7 @@ router.post("/auth/password/forgot", async (req, res) => {
         });
     }
 });
-router.post("/auth/password/reset", async (req, res) => {
+router.post("/auth/password/reset", publicLimiter, async (req, res) => {
     try {
         const token = String(req.body?.token ?? "").trim();
         const password = String(req.body?.password ?? "").trim();

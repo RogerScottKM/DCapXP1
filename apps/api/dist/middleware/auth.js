@@ -3,28 +3,37 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.requireUser = requireUser;
 exports.requireMfa = requireMfa;
 exports.authFromJwt = authFromJwt;
-const prisma_1 = require("../prisma");
-async function requireUser(req, res, next) {
+const api_error_1 = require("../lib/errors/api-error");
+const auth_service_1 = require("../modules/auth/auth.service");
+async function requireUser(req, _res, next) {
     try {
-        const username = String(req.header("x-user") ?? "demo");
-        const user = await prisma_1.prisma.user.findUnique({ where: { username } });
-        if (!user)
-            return res.status(401).json({ ok: false, error: `unknown user '${username}'` });
-        req.user = { id: user.id, username: user.username };
-        return next();
+        const auth = await auth_service_1.authService.resolveAuthFromRequest(req);
+        if (!auth) {
+            throw new api_error_1.ApiError({
+                statusCode: 401,
+                code: "UNAUTHENTICATED",
+                message: "Authentication required.",
+            });
+        }
+        req.auth = auth;
+        req.user = { id: auth.userId, username: auth.userId };
+        next();
     }
-    catch (e) {
-        return res.status(500).json({ ok: false, error: "auth failed" });
+    catch (error) {
+        next(error);
     }
 }
-// DEV MFA gate: require header x-mfa: ok
-function requireMfa(req, res, next) {
-    const ok = String(req.header("x-mfa") ?? "").toLowerCase() === "ok";
-    if (!ok)
-        return res.status(401).json({ ok: false, error: "mfa required (dev): set header x-mfa: ok" });
-    return next();
+function requireMfa(_req, _res, next) {
+    next(new api_error_1.ApiError({
+        statusCode: 501,
+        code: "MFA_NOT_IMPLEMENTED",
+        message: "Legacy development MFA bypass has been disabled. Wire this route to real TOTP/session step-up before enabling it in production.",
+    }));
 }
-// If any other file imports this name, keep it as a no-op for now.
 function authFromJwt(_req, _res, next) {
-    return next();
+    next(new api_error_1.ApiError({
+        statusCode: 501,
+        code: "LEGACY_AUTH_DISABLED",
+        message: "Legacy auth middleware is disabled. Use the canonical session-based require-auth middleware instead.",
+    }));
 }

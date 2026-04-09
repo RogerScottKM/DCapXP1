@@ -1,15 +1,32 @@
 export type EmailProviderName = "console" | "resend";
 
+const isProduction = process.env.NODE_ENV === "production";
+
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+  return value;
+}
+
+const emailProvider = (process.env.EMAIL_PROVIDER ??
+  (isProduction ? "resend" : process.env.RESEND_API_KEY ? "resend" : "console")) as EmailProviderName;
+
+if (isProduction && emailProvider === "console") {
+  throw new Error("EMAIL_PROVIDER=console is not allowed in production");
+}
+
 export const notificationsConfig = {
   appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:3002",
-  emailProvider: (process.env.EMAIL_PROVIDER ?? (process.env.RESEND_API_KEY ? "resend" : "console")) as EmailProviderName,
-  emailFrom: process.env.EMAIL_FROM ?? "DCapX <no-reply@dcapitalx.local>",
+  emailProvider,
+  emailFrom: isProduction
+    ? requireEnv("EMAIL_FROM")
+    : process.env.EMAIL_FROM ?? "DCapX <no-reply@dcapitalx.local>",
   resendApiKey: process.env.RESEND_API_KEY ?? "",
-  otpHmacSecret:
-    process.env.OTP_HMAC_SECRET ??
-    process.env.SESSION_SECRET ??
-    process.env.JWT_SECRET ??
-    "dev-only-change-me",
+  otpHmacSecret: isProduction
+    ? requireEnv("OTP_HMAC_SECRET")
+    : process.env.OTP_HMAC_SECRET ?? "local-dev-only-otp-secret-change-me",
   verificationOtpMinutes: Number(process.env.VERIFICATION_OTP_MINUTES ?? 10),
   resetLinkMinutes: Number(process.env.RESET_LINK_MINUTES ?? 30),
 };

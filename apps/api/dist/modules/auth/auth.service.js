@@ -15,9 +15,10 @@ const auth_dto_1 = require("./auth.dto");
 const auth_mappers_1 = require("./auth.mappers");
 const api_error_1 = require("../../lib/errors/api-error");
 const session_auth_1 = require("../../lib/session-auth");
+const verification_service_1 = require("../verification/verification.service");
 async function registerUser(input) {
     const dto = (0, zod_1.parseDto)(auth_dto_1.registerDto, input);
-    const passwordHash = await argon2_1.default.hash("temporary-password-to-be-reset");
+    const passwordHash = await argon2_1.default.hash(crypto_1.default.randomBytes(32).toString("hex"));
     return (0, tx_1.withTx)(prisma_1.prisma, async (tx) => {
         const user = await tx.user.create({
             data: (0, auth_mappers_1.mapRegisterDtoToUserCreate)(dto, passwordHash),
@@ -65,6 +66,13 @@ class AuthService {
                 statusCode: 401,
                 code: "LOGIN_INVALID_CREDENTIALS",
                 message: "Invalid credentials.",
+            });
+        }
+        if (user.status === "SUSPENDED" || user.status === "CLOSED") {
+            throw new api_error_1.ApiError({
+                statusCode: 403,
+                code: "ACCOUNT_UNAVAILABLE",
+                message: "This account is not available for sign-in.",
             });
         }
         const passwordOk = await argon2_1.default.verify(user.passwordHash, password);
@@ -121,10 +129,7 @@ class AuthService {
         }
         const user = await prisma_1.prisma.user.findUnique({
             where: { id: auth.userId },
-            include: {
-                profile: true,
-                roles: true,
-            },
+            include: { profile: true, roles: true },
         });
         if (!user) {
             throw new api_error_1.ApiError({
@@ -145,13 +150,13 @@ class AuthService {
                         firstName: user.profile.firstName,
                         lastName: user.profile.lastName,
                         country: user.profile.country,
+                        roles: user.roles.map((role) => ({
+                            roleCode: role.roleCode,
+                            scopeType: role.scopeType,
+                            scopeId: role.scopeId,
+                        })),
                     }
                     : null,
-                roles: user.roles.map((role) => ({
-                    roleCode: role.roleCode,
-                    scopeType: role.scopeType,
-                    scopeId: role.scopeId,
-                })),
             },
             session: {
                 id: auth.sessionId,
@@ -183,49 +188,7 @@ class AuthService {
                 message: "Email is required.",
             });
         }
-        const genericResponse = {
-            ok: true,
-            message: "If an account exists for that email, a password reset link has been sent.",
-        };
-        const user = await prisma_1.prisma.user.findUnique({
-            where: { email },
-            select: { id: true, email: true, username: true },
-        });
-        if (!user) {
-            return genericResponse;
-        }
-        const now = new Date();
-        await prisma_1.prisma.passwordResetToken.updateMany({
-            where: {
-                userId: user.id,
-                usedAt: null,
-                expiresAt: { gt: now },
-            },
-            data: {
-                usedAt: now,
-            },
-        });
-        const token = crypto_1.default.randomBytes(32).toString("hex");
-        const tokenHash = this.hashResetToken(token);
-        const expiresAt = new Date(Date.now() + 1000 * 60 * 30);
-        await prisma_1.prisma.passwordResetToken.create({
-            data: {
-                userId: user.id,
-                tokenHash,
-                expiresAt,
-            },
-        });
-        const appBaseUrl = process.env.APP_BASE_URL || "http://localhost:53002";
-        return {
-            ...genericResponse,
-            ...(process.env.NODE_ENV !== "production"
-                ? {
-                    devResetToken: token,
-                    devResetUrl: `${appBaseUrl}/reset-password?token=${token}`,
-                    expiresAtUtc: expiresAt.toISOString(),
-                }
-                : {}),
-        };
+        return verification_service_1.verificationService.requestPasswordReset(email);
     }
     async resetPassword(body) {
         const token = body?.token?.trim();
@@ -237,50 +200,14 @@ class AuthService {
                 message: "Token and new password are required.",
             });
         }
-        if (newPassword.length < 8) {
+        if (newPassword.length < 10) {
             throw new api_error_1.ApiError({
                 statusCode: 400,
                 code: "PASSWORD_TOO_SHORT",
-                message: "Password must be at least 8 characters long.",
+                message: "Password must be at least 10 characters long.",
             });
         }
-        const tokenHash = this.hashResetToken(token);
-        const resetRecord = await prisma_1.prisma.passwordResetToken.findUnique({
-            where: { tokenHash },
-            include: { user: true },
-        });
-        if (!resetRecord || resetRecord.usedAt || resetRecord.expiresAt.getTime() <= Date.now()) {
-            throw new api_error_1.ApiError({
-                statusCode: 400,
-                code: "INVALID_RESET_TOKEN",
-                message: "This password reset link is invalid or has expired.",
-            });
-        }
-        const passwordHash = await argon2_1.default.hash(newPassword);
-        const now = new Date();
-        await prisma_1.prisma.$transaction([
-            prisma_1.prisma.user.update({
-                where: { id: resetRecord.userId },
-                data: { passwordHash },
-            }),
-            prisma_1.prisma.passwordResetToken.update({
-                where: { id: resetRecord.id },
-                data: { usedAt: now },
-            }),
-            prisma_1.prisma.session.updateMany({
-                where: {
-                    userId: resetRecord.userId,
-                    revokedAt: null,
-                },
-                data: {
-                    revokedAt: now,
-                },
-            }),
-        ]);
-        return {
-            ok: true,
-            message: "Password reset successfully. Please sign in with your new password.",
-        };
+        return verification_service_1.verificationService.resetPassword(token, newPassword);
     }
     async sendOtp(userId, body) {
         const channel = body?.channel || "EMAIL";
@@ -320,9 +247,7 @@ class AuthService {
                 consumedAt: null,
                 expiresAt: { gt: now },
             },
-            data: {
-                consumedAt: now,
-            },
+            data: { consumedAt: now },
         });
         const code = this.generateOtpCode();
         const codeHash = this.hashVerificationCode(code);
@@ -387,13 +312,8 @@ class AuthService {
         const [updatedUser] = await prisma_1.prisma.$transaction([
             prisma_1.prisma.user.update({
                 where: { id: userId },
-                data: channel === "EMAIL"
-                    ? { emailVerifiedAt: now }
-                    : { phoneVerifiedAt: now },
-                select: {
-                    emailVerifiedAt: true,
-                    phoneVerifiedAt: true,
-                },
+                data: channel === "EMAIL" ? { emailVerifiedAt: now } : { phoneVerifiedAt: now },
+                select: { emailVerifiedAt: true, phoneVerifiedAt: true },
             }),
             prisma_1.prisma.verificationCode.update({
                 where: { id: record.id },
@@ -402,9 +322,7 @@ class AuthService {
         ]);
         return {
             ok: true,
-            message: channel === "EMAIL"
-                ? "Your email has been verified."
-                : "Your phone number has been verified.",
+            message: channel === "EMAIL" ? "Your email has been verified." : "Your phone number has been verified.",
             emailVerifiedAtUtc: updatedUser.emailVerifiedAt?.toISOString() ?? null,
             phoneVerifiedAtUtc: updatedUser.phoneVerifiedAt?.toISOString() ?? null,
         };
@@ -416,6 +334,7 @@ class AuthService {
             return null;
         const session = await prisma_1.prisma.session.findUnique({
             where: { id: parsed.sessionId },
+            include: { user: true },
         });
         if (!session)
             return null;
@@ -423,13 +342,12 @@ class AuthService {
             return null;
         if (session.expiresAt.getTime() <= Date.now())
             return null;
+        if (session.user.status === "SUSPENDED" || session.user.status === "CLOSED")
+            return null;
         const secretOk = await (0, session_auth_1.verifySessionSecret)(session.refreshTokenHash, parsed.secret);
         if (!secretOk)
             return null;
-        return {
-            userId: session.userId,
-            sessionId: session.id,
-        };
+        return { userId: session.userId, sessionId: session.id };
     }
     getRequestIp(req) {
         const xff = req.headers["x-forwarded-for"];
@@ -437,9 +355,6 @@ class AuthService {
             return xff.split(",")[0].trim();
         }
         return req.socket.remoteAddress ?? null;
-    }
-    hashResetToken(token) {
-        return crypto_1.default.createHash("sha256").update(token).digest("hex");
     }
     hashVerificationCode(code) {
         return crypto_1.default.createHash("sha256").update(code).digest("hex");
@@ -454,9 +369,7 @@ class AuthService {
                 return destination;
             return `${local.slice(0, 2)}***@${domain}`;
         }
-        return destination.length > 4
-            ? `***${destination.slice(-4)}`
-            : destination;
+        return destination.length > 4 ? `***${destination.slice(-4)}` : destination;
     }
 }
 exports.authService = new AuthService();

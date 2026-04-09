@@ -6,15 +6,6 @@ export const SESSION_COOKIE_NAME = "dcapx_session";
 
 const SESSION_TTL_DAYS = 30;
 
-function getCookieAttributes(expiresAt: Date): string {
-  const isProduction = process.env.NODE_ENV === "production";
-  const sameSite = process.env.SESSION_COOKIE_SAMESITE ?? "Lax";
-  const maxAge = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000));
-  return `Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}; ${
-    isProduction ? "Secure; " : ""
-  }Expires=${expiresAt.toUTCString()}`;
-}
-
 export function createSessionSecret(): string {
   return crypto.randomBytes(32).toString("hex");
 }
@@ -23,7 +14,10 @@ export async function hashSessionSecret(secret: string): Promise<string> {
   return argon2.hash(secret);
 }
 
-export async function verifySessionSecret(hash: string, secret: string): Promise<boolean> {
+export async function verifySessionSecret(
+  hash: string,
+  secret: string
+): Promise<boolean> {
   try {
     return await argon2.verify(hash, secret);
   } catch {
@@ -78,17 +72,30 @@ export function getSessionExpiryDate(): Date {
   return d;
 }
 
-export function setSessionCookie(res: Response, sessionCookieValue: string, expiresAt: Date) {
+export function setSessionCookie(
+  res: Response,
+  sessionCookieValue: string,
+  expiresAt: Date
+) {
+  const isProduction = process.env.NODE_ENV === "production";
+
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(sessionCookieValue)}; ${getCookieAttributes(expiresAt)}`
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(
+      sessionCookieValue
+    )}; Path=/; HttpOnly; SameSite=Lax; ${
+      isProduction ? "Secure; " : ""
+    }Expires=${expiresAt.toUTCString()}`
   );
 }
 
 export function clearSessionCookie(res: Response) {
-  const expiresAt = new Date(0);
+  const isProduction = process.env.NODE_ENV === "production";
+
   res.setHeader(
     "Set-Cookie",
-    `${SESSION_COOKIE_NAME}=; ${getCookieAttributes(expiresAt)}`
+    `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; ${
+      isProduction ? "Secure; " : ""
+    }Expires=Thu, 01 Jan 1970 00:00:00 GMT`
   );
 }

@@ -4,31 +4,22 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     container_name: dcapx-api
-    command: ["bash", "-lc", "pnpm prisma generate && pnpm prisma migrate deploy && node dist/server.js"]
+    command: ["bash","-lc","pnpm prisma generate && pnpm prisma migrate deploy && node dist/server.js"]
     environment:
-      NODE_ENV: "production"
       PORT: "4010"
-      DATABASE_URL: ${DATABASE_URL?DATABASE_URL is required}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      ADMIN_KEY: ${ADMIN_KEY?ADMIN_KEY is required}
-      JWT_SECRET: ${JWT_SECRET?JWT_SECRET is required}
-      OTP_HMAC_SECRET: ${OTP_HMAC_SECRET?OTP_HMAC_SECRET is required}
-      APP_BASE_URL: ${APP_BASE_URL?APP_BASE_URL is required}
-      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS?APP_CORS_ORIGINS is required}
-      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-resend}
-      EMAIL_FROM: ${EMAIL_FROM?EMAIL_FROM is required}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
-      TRUST_PROXY: ${TRUST_PROXY:-1}
+      DATABASE_URL: "postgresql://dcapx:dcapx@pg:5432/dcapx?schema=public"
+      REDIS_URL: "redis://redis:6379"
+      ADMIN_KEY: "change-me-now-please"
+      ENABLE_BOT_FARM: "1"
     depends_on:
       pg:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     ports:
       - "127.0.0.1:4010:4010"
     restart: unless-stopped
     stop_grace_period: 30s
     healthcheck:
+      # Uses Node 18's built-in fetch, so no curl needed
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 10s
       timeout: 3s
@@ -39,8 +30,6 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-    security_opt:
-      - no-new-privileges:true
 
   web:
     build:
@@ -85,3 +74,5 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+
+

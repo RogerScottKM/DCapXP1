@@ -45,7 +45,7 @@ export class VerificationService {
     const destinationHash = hashForStorage(email);
     const codeHash = hashForStorage(code);
 
-    await prisma.verificationChallenge.create({
+    const challenge = await prisma.verificationChallenge.create({
       data: {
         userId: user.id,
         channel: "EMAIL",
@@ -68,6 +68,7 @@ export class VerificationService {
     return {
       ok: true,
       message: "If an account exists, a verification email has been sent.",
+      challengeId: challenge.id,
     };
   }
 
@@ -164,7 +165,7 @@ export class VerificationService {
     const destinationHash = hashForStorage(email);
     const codeHash = hashForStorage(token);
 
-    await prisma.verificationChallenge.create({
+    const challenge = await prisma.verificationChallenge.create({
       data: {
         userId: user.id,
         channel: "EMAIL",
@@ -189,6 +190,7 @@ export class VerificationService {
     return {
       ok: true,
       message: "If an account exists, a reset email has been sent.",
+      challengeId: challenge.id,
     };
   }
 
@@ -232,15 +234,6 @@ export class VerificationService {
       prisma.user.update({
         where: { id: challenge.userId },
         data: { passwordHash: newPasswordHash },
-      }),
-      prisma.session.updateMany({
-        where: {
-          userId: challenge.userId,
-          revokedAt: null,
-        },
-        data: {
-          revokedAt: now,
-        },
       }),
     ]);
 

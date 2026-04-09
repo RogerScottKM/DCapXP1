@@ -1,0 +1,139 @@
+import { prisma } from "../../lib/prisma";
+import { notificationsConfig } from "./notifications.config";
+import type { EmailProvider } from "./notifications.types";
+import { ConsoleEmailProvider } from "./providers/console-email.provider";
+import { ResendEmailProvider } from "./providers/resend-email.provider";
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return email;
+  const shown = local.length <= 2 ? local[0] ?? "*" : `${local.slice(0, 2)}***`;
+  return `${shown}@${domain}`;
+}
+
+function getEmailProvider(): EmailProvider {
+  if (notificationsConfig.emailProvider === "resend") {
+    if (!notificationsConfig.resendApiKey) {
+      throw new Error("RESEND_API_KEY is required when EMAIL_PROVIDER=resend");
+    }
+    return new ResendEmailProvider(
+      notificationsConfig.resendApiKey,
+      notificationsConfig.emailFrom
+    );
+  }
+  return new ConsoleEmailProvider();
+}
+
+export class NotificationService {
+  private readonly emailProvider = getEmailProvider();
+
+  async sendVerificationOtpEmail(args: {
+    userId: string;
+    to: string;
+    code: string;
+  }): Promise<void> {
+    const subject = "Verify your DCapX email";
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.5">
+        <h2>Verify your DCapX email</h2>
+        <p>Your verification code is:</p>
+        <p style="font-size:28px;font-weight:700;letter-spacing:4px">${args.code}</p>
+        <p>This code expires in ${notificationsConfig.verificationOtpMinutes} minutes.</p>
+      </div>
+    `;
+    const text = `Your DCapX verification code is ${args.code}. It expires in ${notificationsConfig.verificationOtpMinutes} minutes.`;
+
+    let providerMessageId: string | null = null;
+    let status = "SENT";
+    let errorCode: string | null = null;
+    let errorMessage: string | null = null;
+    let provider = notificationsConfig.emailProvider;
+
+    try {
+      const result = await this.emailProvider.send({
+        to: args.to,
+        subject,
+        html,
+        text,
+      });
+      provider = result.provider;
+      providerMessageId = result.providerMessageId ?? null;
+    } catch (error: any) {
+      status = "FAILED";
+      errorCode = "EMAIL_SEND_FAILED";
+      errorMessage = error?.message ?? "Unknown email provider error";
+      throw error;
+    } finally {
+      await prisma.notificationDelivery.create({
+        data: {
+          userId: args.userId,
+          channel: "EMAIL",
+          templateKey: "VERIFY_EMAIL_OTP",
+          provider,
+          destinationMasked: maskEmail(args.to),
+          providerMessageId,
+          status,
+          errorCode,
+          errorMessage,
+          metadata: null,
+        },
+      });
+    }
+  }
+
+  async sendPasswordResetEmail(args: {
+    userId: string;
+    to: string;
+    resetUrl: string;
+  }): Promise<void> {
+    const subject = "Reset your DCapX password";
+    const html = `
+      <div style="font-family:Arial,sans-serif;line-height:1.5">
+        <h2>Reset your DCapX password</h2>
+        <p>Use the link below to reset your password:</p>
+        <p><a href="${args.resetUrl}">${args.resetUrl}</a></p>
+        <p>This link expires in ${notificationsConfig.resetLinkMinutes} minutes.</p>
+      </div>
+    `;
+    const text = `Reset your DCapX password using this link: ${args.resetUrl}. It expires in ${notificationsConfig.resetLinkMinutes} minutes.`;
+
+    let providerMessageId: string | null = null;
+    let status = "SENT";
+    let errorCode: string | null = null;
+    let errorMessage: string | null = null;
+    let provider = notificationsConfig.emailProvider;
+
+    try {
+      const result = await this.emailProvider.send({
+        to: args.to,
+        subject,
+        html,
+        text,
+      });
+      provider = result.provider;
+      providerMessageId = result.providerMessageId ?? null;
+    } catch (error: any) {
+      status = "FAILED";
+      errorCode = "EMAIL_SEND_FAILED";
+      errorMessage = error?.message ?? "Unknown email provider error";
+      throw error;
+    } finally {
+      await prisma.notificationDelivery.create({
+        data: {
+          userId: args.userId,
+          channel: "EMAIL",
+          templateKey: "PASSWORD_RESET",
+          provider,
+          destinationMasked: maskEmail(args.to),
+          providerMessageId,
+          status,
+          errorCode,
+          errorMessage,
+          metadata: null,
+        },
+      });
+    }
+  }
+}
+
+export const notificationService = new NotificationService();

@@ -36,7 +36,8 @@ class AdvisorService {
         });
         return {
             clientId,
-            clientDisplayName: [client.firstName, client.lastName].filter(Boolean).join(" "),
+            clientDisplayName: [client.profile?.firstName, client.profile?.lastName].filter(Boolean).join(" ") ||
+                client.username,
             consent: {
                 canViewSummary,
                 consentType: "ADVISOR_DATA_SHARING_CONSENT",

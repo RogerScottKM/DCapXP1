@@ -1,44 +1,22 @@
-// apps/web/app/api/stream/[symbol]/route.ts
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export async function GET(
+  _req: Request,
+  ctx: { params: { symbol: string } }
+) {
+  const base = process.env.API_INTERNAL_URL ?? "http://api:4010";
+  const url = `${base}/v1/stream/${encodeURIComponent(ctx.params.symbol)}`;
 
-export async function GET(req: Request, { params }: { params: { symbol: string } }) {
-  const base =
-    process.env.API_INTERNAL_URL ||
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://127.0.0.1:4010";
-
-  const symbol = encodeURIComponent(params.symbol);
-  const incoming = new URL(req.url);
-  const qs = incoming.searchParams.toString();
-  const upstream = `${base}/v1/stream/${symbol}${qs ? `?${qs}` : ""}`;
-
-  const r = await fetch(upstream, {
+  const upstream = await fetch(url, {
     cache: "no-store",
-    headers: { accept: "text/event-stream" },
+    headers: { Accept: "text/event-stream" },
   });
 
-  const ct = r.headers.get("content-type") ?? "";
-
-  // If upstream is SSE, stream it through.
-  if (ct.includes("text/event-stream")) {
-    return new Response(r.body, {
-      status: r.status,
-      headers: {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        "connection": "keep-alive",
-      },
-    });
-  }
-
-  // Otherwise return JSON (or whatever upstream returned) faithfully.
-  const buf = await r.arrayBuffer();
-  return new Response(buf, {
-    status: r.status,
+  return new Response(upstream.body, {
+    status: upstream.status,
     headers: {
-      "content-type": ct || "application/json; charset=utf-8",
-      "cache-control": "no-store",
+      "Content-Type": upstream.headers.get("content-type") ?? "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }

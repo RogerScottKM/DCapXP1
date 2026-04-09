@@ -1,10 +1,20 @@
-import type { ApiErrorResponse } from "@dcapx/contracts";
-
-const API_BASE_URL =
+const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
 
+function resolveUrl(input: string): string {
+  if (input.startsWith("http")) return input;
+
+  if (!API_BASE) return input;
+
+  if (input.startsWith("/api/")) {
+    return `${API_BASE}${input.slice(4)}`;
+  }
+
+  return `${API_BASE}${input}`;
+}
+
 export async function apiFetch<T>(input: string, init?: RequestInit): Promise<T> {
-  const url = `${API_BASE_URL}${input}`;
+  const url = resolveUrl(input);
 
   const response = await fetch(url, {
     credentials: "include",
@@ -15,10 +25,24 @@ export async function apiFetch<T>(input: string, init?: RequestInit): Promise<T>
     ...init,
   });
 
-  if (!response.ok) {
-    const error = (await response.json()) as ApiErrorResponse;
-    throw error;
+  let parsed: any = null;
+
+  try {
+    parsed = await response.json();
+  } catch {
+    parsed = null;
   }
 
-  return response.json() as Promise<T>;
+  if (!response.ok) {
+    throw (
+      parsed || {
+        error: {
+          code: "HTTP_ERROR",
+          message: `Request failed with status ${response.status}.`,
+        },
+      }
+    );
+  }
+
+  return parsed as T;
 }

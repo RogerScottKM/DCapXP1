@@ -40,6 +40,8 @@ function statusClasses(status: string) {
 
 function nextStepHref(stepCode: string | null) {
   switch (stepCode) {
+    case "CONTACT_VERIFIED":
+      return "/app/verify-contact";
     case "CONSENTS_ACCEPTED":
       return "/app/consents";
     case "KYC_SUBMITTED":
@@ -49,7 +51,6 @@ function nextStepHref(stepCode: string | null) {
       return null;
   }
 }
-
 function StepCard({ step }: { step: OnboardingStepDto }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">

@@ -169,7 +169,7 @@ async function getGapFilledCandles(symbol, mode, periodMs, limit, nowMs = Date.n
  * - L3 is gated unless admin or flags.publicAllowL3=true
  * - SSE itself can be disabled publicly via flags.enableSSE=false (admin still allowed)
  */
-router.get("/stream/:symbol", async (req, res) => {
+router.get("/:symbol", async (req, res) => {
     const symbol = String(req.params.symbol ?? "").toUpperCase().trim();
     const mode = (0, mode_1.resolveMode)(req);
     const depth = (0, marketShared_1.parsePositiveInt)(req.query.depth, 25, { min: 1, max: 500 });

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/router";
 import type {
   AcceptConsentsRequest,
@@ -6,14 +7,11 @@ import type {
   GetRequiredConsentsResponse,
 } from "@dcapx/contracts";
 import { acceptConsents, getRequiredConsents } from "../../lib/api/consents";
+import { friendlyPortalError } from "../../lib/api/friendlyError";
 import PortalShell from "../ui/PortalShell";
 
-function statusMessageBox(
-  kind: "error" | "success",
-  message: string
-) {
-  const base =
-    "rounded-2xl border px-4 py-3 text-sm";
+function statusMessageBox(kind: "error" | "success", message: string) {
+  const base = "rounded-2xl border px-4 py-3 text-sm";
   const classes =
     kind === "error"
       ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200"
@@ -61,9 +59,7 @@ export default function ConsentsPage() {
       } catch (error: any) {
         if (!isMounted) return;
         setErrorMessage(
-          error?.error?.message ||
-            error?.message ||
-            "Failed to load required consents."
+          friendlyPortalError(error, "Failed to load required consents.")
         );
       } finally {
         if (isMounted) setIsLoading(false);
@@ -85,6 +81,8 @@ export default function ConsentsPage() {
     if (!requiredItems.length) return false;
     return requiredItems.every((item) => Boolean(selected[item.consentType]));
   }, [requiredItems, selected]);
+
+  const isAuthError = errorMessage === "Please sign in to continue.";
 
   function toggleConsent(consentType: ConsentType) {
     setSelected((prev) => ({
@@ -124,9 +122,7 @@ export default function ConsentsPage() {
       }, 800);
     } catch (error: any) {
       setErrorMessage(
-        error?.error?.message ||
-          error?.message ||
-          "Failed to accept consents."
+        friendlyPortalError(error, "Failed to accept consents.")
       );
     } finally {
       setIsSubmitting(false);
@@ -150,7 +146,16 @@ export default function ConsentsPage() {
         {!isLoading && errorMessage ? statusMessageBox("error", errorMessage) : null}
         {!isLoading && successMessage ? statusMessageBox("success", successMessage) : null}
 
-        {!isLoading && data ? (
+        {isAuthError ? (
+          <div className="rounded-2xl border border-cyan-300 bg-cyan-50 px-4 py-3 text-sm text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-200">
+            Please sign in first to review and accept consents.{" "}
+            <Link href="/login" className="font-medium underline">
+              Go to login
+            </Link>
+          </div>
+        ) : null}
+
+        {!isLoading && data && !isAuthError ? (
           <form onSubmit={handleSubmit} className="grid gap-6">
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
               <div className="mb-6 flex items-start justify-between gap-4">

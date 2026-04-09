@@ -1,2 +1,3 @@
-import InvitationAcceptancePage from "@/features/invitations/InvitationAcceptancePage";
+import InvitationAcceptancePage from "../../src/features/invitations/InvitationAcceptancePage";
+
 export default InvitationAcceptancePage;

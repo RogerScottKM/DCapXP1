@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import ThemeToggle from "@/components/ThemeToggle";
+import Providers from "./Providers";
 
 export const metadata: Metadata = {
   title: "DCapX — Agent-Native Exchange",
@@ -23,6 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <Providers>
         <header className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/75 backdrop-blur dark:border-slate-800/60 dark:bg-slate-950/70">
           <nav className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-6">
             <Link href="/" className="font-semibold tracking-tight">
@@ -64,7 +66,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             © {new Date().getFullYear()} DCapital Global. All rights reserved.
           </div>
         </footer>
-      </body>
+      </Providers>
+    </body>
     </html>
   );
 }

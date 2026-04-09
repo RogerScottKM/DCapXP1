@@ -1,0 +1,36 @@
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+
+export async function apiFetch<T>(input: string, init?: RequestInit): Promise<T> {
+  const url = input.startsWith("http") ? input : `${API_BASE}${input}`;
+
+  const response = await fetch(url, {
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+
+  let parsed: any = null;
+
+  try {
+    parsed = await response.json();
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    throw (
+      parsed || {
+        error: {
+          code: "HTTP_ERROR",
+          message: `Request failed with status ${response.status}.`,
+        },
+      }
+    );
+  }
+
+  return parsed as T;
+}

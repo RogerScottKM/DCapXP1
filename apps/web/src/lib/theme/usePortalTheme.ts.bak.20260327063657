@@ -1,0 +1,49 @@
+import { useEffect, useMemo, useState } from "react";
+
+export type PortalTheme = "dark" | "light";
+
+const STORAGE_KEY = "dcapx-theme";
+
+export function usePortalTheme() {
+  const [theme, setTheme] = useState<PortalTheme>("dark");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      if (stored === "dark" || stored === "light") {
+        setTheme(stored);
+      } else {
+        const prefersDark =
+          typeof window !== "undefined" &&
+          window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        setTheme(prefersDark ? "dark" : "light");
+      }
+    } finally {
+      setMounted(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    window.localStorage.setItem(STORAGE_KEY, theme);
+    document.documentElement.dataset.dcapxTheme = theme;
+  }, [mounted, theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  };
+
+  return useMemo(
+    () => ({
+      theme,
+      isDark: theme === "dark",
+      isLight: theme === "light",
+      mounted,
+      setTheme,
+      toggleTheme,
+    }),
+    [theme, mounted]
+  );
+}

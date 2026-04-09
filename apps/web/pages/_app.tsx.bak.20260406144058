@@ -1,0 +1,10 @@
+import type { AppProps } from "next/app";
+import { PortalPreferencesProvider } from "../src/lib/preferences/PortalPreferencesProvider";
+
+export default function App({ Component, pageProps }: AppProps) {
+  return (
+    <PortalPreferencesProvider>
+      <Component {...pageProps} />
+    </PortalPreferencesProvider>
+  );
+}

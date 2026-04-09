@@ -1,0 +1,27 @@
+type CountryListItem = {
+  code: string;
+  name: string;
+};
+
+type CountryListModule = {
+  getData: () => CountryListItem[];
+};
+
+const { getData } = require("country-list") as CountryListModule;
+
+export type CountryOption = {
+  code: string;
+  name: string;
+};
+
+export const COUNTRY_OPTIONS: CountryOption[] = getData()
+  .map((item) => ({
+    code: item.code.toUpperCase(),
+    name: item.name,
+  }))
+  .sort((a, b) => a.name.localeCompare(b.name));
+
+export function getCountryName(code: string): string {
+  const normalized = code.trim().toUpperCase();
+  return COUNTRY_OPTIONS.find((item) => item.code === normalized)?.name ?? normalized;
+}

@@ -1,4 +1,3 @@
-// apps/api/src/server.ts
 import "dotenv/config";
 import { startBotFarm } from "./botFarm";
 import app from "./app";

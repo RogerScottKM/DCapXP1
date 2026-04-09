@@ -3,6 +3,199 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickData, UTCTimestamp, ISeriesApi } from "lightweight-charts";
 
+const RVAI_VISUAL_HISTORY_BARS = 160;
+const RVAI_WICK_CAP_PCT = 0.018;
+const RVAI_WICK_BODY_MULTIPLIER = 1.25;
+const RVAI_PREHISTORY_DRIFT_PCT = 0.0007;
+
+function candlePeriodToMs(period?: string): number {
+  switch ((period ?? "").trim()) {
+    case "1m":
+      return 60_000;
+    case "5m":
+      return 5 * 60_000;
+    case "15m":
+      return 15 * 60_000;
+    case "1h":
+      return 60 * 60_000;
+    case "4h":
+      return 4 * 60 * 60_000;
+    case "1d":
+      return 24 * 60 * 60_000;
+    default:
+      return 5 * 60_000;
+  }
+}
+
+function toFiniteNumber(value: any, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function readTimeValue(candle: any): any {
+  return candle?.time ?? candle?.t ?? candle?.timestamp ?? null;
+}
+
+function timeToMs(value: any): number | null {
+  if (typeof value === "number") {
+    if (value > 1_000_000_000_000) return value;
+    if (value > 1_000_000_000) return value * 1000;
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function writeTimeLike(template: any, ms: number): any {
+  const source = readTimeValue(template);
+
+  if (typeof source === "number") {
+    if (source > 1_000_000_000_000) return ms;
+    if (source > 1_000_000_000) return Math.floor(ms / 1000);
+    return Math.floor(ms / 1000);
+  }
+
+  if (typeof source === "string") {
+    return new Date(ms).toISOString();
+  }
+
+  return ms;
+}
+
+function readOHLC(candle: any) {
+  const open = toFiniteNumber(candle?.open ?? candle?.o, 0);
+  const high = toFiniteNumber(candle?.high ?? candle?.h, open);
+  const low = toFiniteNumber(candle?.low ?? candle?.l, open);
+  const close = toFiniteNumber(candle?.close ?? candle?.c, open);
+
+  return { open, high, low, close };
+}
+
+function writeOHLC(template: any, open: number, high: number, low: number, close: number) {
+  const next = { ...template };
+
+  if ("open" in next || !("o" in next)) next.open = open;
+  else next.o = open;
+
+  if ("high" in next || !("h" in next)) next.high = high;
+  else next.h = high;
+
+  if ("low" in next || !("l" in next)) next.low = low;
+  else next.l = low;
+
+  if ("close" in next || !("c" in next)) next.close = close;
+  else next.c = close;
+
+  if ("time" in next || !("t" in next)) next.time = writeTimeLike(template, timeToMs(readTimeValue(template)) ?? Date.now());
+  else next.t = writeTimeLike(template, timeToMs(readTimeValue(template)) ?? Date.now());
+
+  return next;
+}
+
+function clampRvaiWicks(candle: any): any {
+  const { open, high, low, close } = readOHLC(candle);
+  const reference = Math.max(open, close, 0.0001);
+  const body = Math.max(Math.abs(close - open), reference * 0.00045);
+  const maxWick = Math.max(reference * RVAI_WICK_CAP_PCT, body * RVAI_WICK_BODY_MULTIPLIER);
+
+  const top = Math.max(open, close);
+  const bottom = Math.min(open, close);
+
+  const adjustedHigh = Math.min(high, top + maxWick);
+  const adjustedLow = Math.max(0.000001, Math.max(low, bottom - maxWick));
+
+  const next = { ...candle };
+
+  if ("high" in next || !("h" in next)) next.high = adjustedHigh;
+  else next.h = adjustedHigh;
+
+  if ("low" in next || !("l" in next)) next.low = adjustedLow;
+  else next.l = adjustedLow;
+
+  return next;
+}
+
+function prependRvaiHistory(candles: any[]): any[] {
+  if (!candles.length) return candles;
+  if (candles.length >= RVAI_VISUAL_HISTORY_BARS) return candles;
+
+  const first = candles[0];
+  const firstMs = timeToMs(readTimeValue(first));
+  if (!firstMs) return candles;
+
+  let stepMs = 5 * 60_000;
+  if (candles.length >= 2) {
+    const firstMsCandidate = timeToMs(readTimeValue(candles[0]));
+    const secondMsCandidate = timeToMs(readTimeValue(candles[1]));
+    const inferred =
+      firstMsCandidate && secondMsCandidate
+        ? Math.abs(secondMsCandidate - firstMsCandidate)
+        : 0;
+    if (Number.isFinite(inferred) && inferred > 0) {
+      stepMs = inferred;
+    }
+  }
+  const missing = RVAI_VISUAL_HISTORY_BARS - candles.length;
+
+  const firstOhlc = readOHLC(first);
+  let price = Math.max(firstOhlc.open || firstOhlc.close || 0.1, 0.0001);
+
+  const extras: any[] = [];
+
+  for (let i = missing; i >= 1; i -= 1) {
+    const ms = firstMs - stepMs * i;
+    const wobble = Math.sin(i * 0.77) * price * RVAI_PREHISTORY_DRIFT_PCT;
+    const open = price;
+    const close = Math.max(0.0001, price + wobble * 0.55);
+    const body = Math.max(Math.abs(close - open), price * 0.00035);
+    const wick = Math.max(price * 0.0015, body * 0.95);
+
+    const high = Math.max(open, close) + wick;
+    const low = Math.max(0.0001, Math.min(open, close) - wick);
+
+    const template = { ...first };
+
+    if ("time" in template || !("t" in template)) template.time = writeTimeLike(first, ms);
+    else template.t = writeTimeLike(first, ms);
+
+    if ("open" in template || !("o" in template)) template.open = open;
+    else template.o = open;
+
+    if ("high" in template || !("h" in template)) template.high = high;
+    else template.h = high;
+
+    if ("low" in template || !("l" in template)) template.low = low;
+    else template.l = low;
+
+    if ("close" in template || !("c" in template)) template.close = close;
+    else template.c = close;
+
+    extras.push(template);
+    price = close;
+  }
+
+  return [...extras, ...candles];
+}
+
+function normalizeSyntheticRvaiCandles(
+  candles: any[],
+  symbol: string
+): any[] {
+  if (String(symbol) !== "RVAI-USD") return candles;
+  if (!Array.isArray(candles) || candles.length === 0) return candles;
+
+  // Backend botFarm is now the single source of truth for RVAI history.
+  // Keep only wick normalization here.
+  return candles.map((candle) => clampRvaiWicks(candle));
+}
+
+
+
 type Tf = "1m" | "5m" | "1h" | "1d";
 type Mode = "LIVE" | "PAPER";
 
@@ -30,6 +223,32 @@ function normalizeCandles(raw: any[]): CandlestickData[] {
 }
 
 export default function CandlesPanel({ symbol, mode }: { symbol: string; mode: Mode }) {
+  const [isDark, setIsDark] = useState(false);
+
+  useEffect(() => {
+    const readTheme = () => {
+      if (typeof document === "undefined") return false;
+      const el = document.documentElement;
+      return el.dataset.dcapxTheme === "dark" || el.classList.contains("dark");
+    };
+
+    setIsDark(readTheme());
+
+    if (typeof MutationObserver === "undefined" || typeof document === "undefined") {
+      return;
+    }
+
+    const observer = new MutationObserver(() => {
+      setIsDark(readTheme());
+    });
+
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-dcapx-theme"],
+    });
+
+    return () => observer.disconnect();
+  }, []);
   const [tf, setTf] = useState<Tf>("5m");
   const [err, setErr] = useState<string | null>(null);
 
@@ -55,7 +274,10 @@ export default function CandlesPanel({ symbol, mode }: { symbol: string; mode: M
     const chart = createChart(ref.current, {
       width: ref.current.clientWidth,
       height: 320,
-      layout: { background: { color: "transparent" }, textColor: "#cbd5e1" },
+      layout: {
+      background: { color: isDark ? "#020617" : "#f8fafc" },
+      textColor: isDark ? "#cbd5e1" : "#475569",
+    },
       grid: { vertLines: { visible: false }, horzLines: { visible: false } },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false },
@@ -100,7 +322,7 @@ const series = chart.addCandlestickSeries(
       chartRef.current = null;
       seriesRef.current = null;
     };
-  }, [symbol]);
+  }, [symbol, isDark]);
 
   // Load candles when symbol/tf/mode changes
   useEffect(() => {
@@ -110,7 +332,7 @@ const series = chart.addCandlestickSeries(
 async function load() {
   
   const limit =
-    tf === "1m" ? 1500 :   // ~25 hours
+    tf === "1m" ? 2500 :   // ~25 hours
     tf === "5m" ? 2000 :   // ~6.9 days
     tf === "1h" ? 2000 :   // ~83 days
     2000;
@@ -118,7 +340,12 @@ async function load() {
   const issuerControlled = /^(RVAI|RVGX|APTV)-/i.test(symbol);
   const source = issuerControlled ? "dcapx" : "auto";
 
-  const base = `/api/candles/${encodeURIComponent(symbol)}?period=${tf}&source=${source}&limit=${limit}`;  
+  const candleSource =
+    symbol === "RVAI-USD" && mode === "PAPER"
+      ? "trades"
+      : "auto";
+
+  const base = `/api/candles/${encodeURIComponent(symbol)}?period=${tf}&source=${candleSource}&limit=${limit}`;  
 
   async function fetchJson(url: string) {
     const r = await fetch(url, { cache: "no-store" });
@@ -225,6 +452,8 @@ if (!r.ok || j?.ok === false || !Array.isArray(j?.candles) || j.candles.length =
   return;
 }
   const rawCandles = Array.isArray(j.candles) ? [...j.candles] : [];
+
+  const displayCandles = normalizeSyntheticRvaiCandles(rawCandles as any[], symbol as string);
   const activeCount = rawCandles.filter((c: any) => {
   const v = Number(c?.v ?? 0);
   const o = Number(c?.o ?? c?.open);
@@ -248,10 +477,10 @@ console.log("[CandlesPanel:data]", {
   symbol,
   mode,
   tf,
-  rawCount: rawCandles.length,
+  rawCount: displayCandles.length,
   activeCount,
-  first: rawCandles[0],
-  last: rawCandles[rawCandles.length - 1],
+  first: displayCandles[0],
+  last: displayCandles[displayCandles.length - 1],
 });
 
   // Keep raw + normalized candles in the same chronological order
@@ -261,16 +490,16 @@ console.log("[CandlesPanel:data]", {
     return ta - tb;
   });
 
-  const candles = normalizeCandles(rawCandles);
+  const candles = normalizeCandles(displayCandles);
 
 console.log("[CandlesPanel:data]", {
   symbol,
   mode,
   tf,
-  rawCount: rawCandles.length,
+  rawCount: displayCandles.length,
   normalizedCount: candles.length,
-  firstRaw: rawCandles[0],
-  lastRaw: rawCandles[rawCandles.length - 1],
+  firstRaw: displayCandles[0],
+  lastRaw: displayCandles[displayCandles.length - 1],
 });
 
   const chart = chartRef.current;
@@ -286,19 +515,43 @@ console.log("[CandlesPanel:data]", {
   mode,
   tf,
   issuerControlled,
-  rawCount: rawCandles.length,
+  rawCount: displayCandles.length,
   normalizedCount: candles.length,
-  sampleFirst: rawCandles[0],
-  sampleLast: rawCandles[rawCandles.length - 1],
+  sampleFirst: displayCandles[0],
+  sampleLast: displayCandles[displayCandles.length - 1],
   });
   
   seriesRef.current?.setData(candles);
 
-  // Find the last active candle index in the full series
-  let lastActiveIndex = rawCandles.length - 1;
+  if (symbol === "RVAI-USD") {
+    requestAnimationFrame(() => {
+      const chartNow = chartRef.current;
+      if (!chartNow) return;
 
-  for (let i = rawCandles.length - 1; i >= 0; i--) {
-    const c = rawCandles[i];
+      chartNow.timeScale().fitContent();
+      chartNow.timeScale().applyOptions({
+        rightOffset: 2,
+        barSpacing: tf === "1m" ? 2.2 : tf === "5m" ? 5.5 : tf === "1h" ? 8 : 10,
+      });
+    });
+
+    console.log("[CandlesPanel:plot:rvai-fit]", {
+      symbol,
+      mode,
+      tf,
+      candleCount: candles.length,
+      first: candles[0],
+      last: candles[candles.length - 1],
+    });
+
+    return;
+  }
+
+  // Find the last active candle index in the full series
+  let lastActiveIndex = displayCandles.length - 1;
+
+  for (let i = displayCandles.length - 1; i >= 0; i--) {
+    const c = displayCandles[i];
     const v = Number(c?.v ?? 0);
     const o = Number(c?.o ?? c?.open);
     const h = Number(c?.h ?? c?.high);
@@ -319,15 +572,31 @@ console.log("[CandlesPanel:data]", {
   }
 
   const WINDOW =
-    tf === "1m" ? 120 :
-    tf === "5m" ? 120 :
-    tf === "1h" ? 200 :
-    200;
+    symbol === "RVAI-USD"
+      ? (
+          tf === "1m" ? 2500 :
+          tf === "5m" ? 600 :
+          tf === "1h" ? 120 :
+          200
+        )
+      : (
+          tf === "1m" ? 120 :
+          tf === "5m" ? 120 :
+          tf === "1h" ? 200 :
+          200
+        );
 
-  // Focus the visible x-window around the active region,
-  // instead of ending on the long flat synthetic tail
-  const from = Math.max(0, lastActiveIndex - WINDOW + 1);
-  const to = Math.min(candles.length - 1, lastActiveIndex + 3);
+  // For RVAI, always show the full loaded backend history window.
+  // For other symbols, keep the recent focused viewport.
+  const from =
+    symbol === "RVAI-USD"
+      ? 0
+      : Math.max(0, lastActiveIndex - WINDOW + 1);
+
+  const to =
+    symbol === "RVAI-USD"
+      ? Math.max(0, candles.length - 1)
+      : Math.min(candles.length - 1, lastActiveIndex + 3);
 
 console.log("[CandlesPanel:plot]", {
   symbol,
@@ -343,11 +612,19 @@ console.log("[CandlesPanel:plot]", {
     chart.applyOptions({
       timeScale: {
         rightOffset: 2,
-        barSpacing: issuerControlled ? 14 : 8,
+        barSpacing: symbol === "RVAI-USD" ? 5 : issuerControlled ? 14 : 8,
       },
     });
 
-    chart.timeScale().setVisibleLogicalRange({ from, to });
+    if (symbol === "RVAI-USD") {
+      chart.timeScale().fitContent();
+      chart.timeScale().applyOptions({
+        rightOffset: 2,
+        barSpacing: 5,
+      });
+    } else {
+      chart.timeScale().setVisibleLogicalRange({ from, to });
+    }
 
     chart.priceScale("right").applyOptions({
       autoScale: true,
@@ -366,17 +643,17 @@ console.log("[CandlesPanel:plot]", {
     return () => {
       alive = false;
     };
-  }, [symbol, tf, mode]);
+  }, [symbol, tf, mode, isDark]);
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+    <div className={`rounded-2xl border p-4 ${isDark ? "border-white/10 bg-slate-900/70 shadow-none" : "border-slate-200 bg-white/80 shadow-[0_0_0_1px_rgba(15,23,42,0.04)]"}`}>
       <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm text-slate-200">Candles</div>
+        <div className={`text-sm ${isDark ? "text-slate-200" : "font-medium text-slate-700"}`}>Candles</div>
         <div className="flex gap-2">
           {tfs.map((x) => (
             <button
               key={x}
-              className={`rounded-lg px-3 py-1 text-xs ${tf === x ? "bg-white/15 text-white" : "bg-white/5 text-slate-300"}`}
+              className={`rounded-lg px-3 py-1 text-xs transition ${tf === x ? (isDark ? "bg-white/15 text-white" : "bg-slate-200 text-slate-900") : (isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200")}`}
               onClick={() => setTf(x)}
             >
               {x}
@@ -391,7 +668,7 @@ console.log("[CandlesPanel:plot]", {
         </div>
       ) : null}
 
-      <div ref={ref} />
+      <div ref={ref} className={isDark ? "rounded-xl bg-slate-950" : "rounded-xl bg-slate-50"} />
     </div>
   );
 }

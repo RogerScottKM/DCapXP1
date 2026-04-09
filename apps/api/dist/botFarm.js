@@ -10,20 +10,20 @@ const BANDS = {
         min: Number(process.env.RVAI_MIN ?? 0.083),
         max: Number(process.env.RVAI_MAX ?? 0.12),
         tickOverride: Number(process.env.RVAI_TICK ?? 0.0001),
-        // Much calmer intrabar behavior, still active enough to feel alive
-        driftPct: 0.00135,
-        wickTicks: 6,
-        pullToAnchor: 0.065,
-        anchorNoisePct: 0.0035,
-        jumpProb: 0.006,
-        jumpTicksMin: 6,
-        jumpTicksMax: 22,
-        regimeMinSec: 24,
-        regimeMaxSec: 110,
-        forceTradeEveryMs: 2400,
+        // Calmer synthetic profile with less exaggerated wick pressure
+        driftPct: 0.00012,
+        wickTicks: 5,
+        pullToAnchor: 0.080,
+        anchorNoisePct: 0.0024,
+        jumpProb: 0.0045,
+        jumpTicksMin: 4,
+        jumpTicksMax: 14,
+        regimeMinSec: 28,
+        regimeMaxSec: 120,
+        forceTradeEveryMs: 2600,
         openLevels: 4,
-        openLimit: 160,
-        tradeLimit: 9000,
+        openLimit: 180,
+        tradeLimit: 250000,
         staleOpenMs: 90_000,
     },
     "BTC-USD": {
@@ -303,6 +303,109 @@ async function initState(symbol, cfg) {
         lastCleanupAt: 0,
     };
 }
+async function seedHistoricalFilledTrade(symbol, cfg, pxNum, at, userIds) {
+    if (userIds.length < 2)
+        return null;
+    const [buyer, seller] = pickTwoDistinct(userIds);
+    const qty = qtyFor(symbol);
+    const px = clamp(pxNum, cfg.min, cfg.max).toFixed(8);
+    const [buy, sell] = await prisma.$transaction([
+        prisma.order.create({
+            data: {
+                mode: client_1.TradeMode.PAPER,
+                symbol,
+                side: client_1.OrderSide.BUY,
+                price: px,
+                qty,
+                status: client_1.OrderStatus.FILLED,
+                userId: buyer,
+                createdAt: at,
+            },
+            select: { id: true },
+        }),
+        prisma.order.create({
+            data: {
+                mode: client_1.TradeMode.PAPER,
+                symbol,
+                side: client_1.OrderSide.SELL,
+                price: px,
+                qty,
+                status: client_1.OrderStatus.FILLED,
+                userId: seller,
+                createdAt: at,
+            },
+            select: { id: true },
+        }),
+    ]);
+    await prisma.trade.create({
+        data: {
+            mode: client_1.TradeMode.PAPER,
+            symbol,
+            price: px,
+            qty,
+            buyOrderId: buy.id,
+            sellOrderId: sell.id,
+            createdAt: at,
+        },
+    });
+    return Number(px);
+}
+async function ensureRvaiPaperHistory(symbol, cfg, userIds) {
+    if (symbol !== "RVAI-USD")
+        return;
+    if (userIds.length < 2)
+        return;
+    const targetSpanMs = Number(process.env.RVAI_HISTORY_SPAN_MS ?? 36 * 60 * 60 * 1000);
+    const stepMs = Number(process.env.RVAI_HISTORY_STEP_MS ?? 30_000);
+    const maxPoints = Number(process.env.RVAI_HISTORY_MAX_POINTS ?? 5000);
+    const now = Date.now();
+    const desiredStartMs = now - targetSpanMs;
+    const oldest = await prisma.trade.findFirst({
+        where: { symbol, mode: client_1.TradeMode.PAPER },
+        orderBy: { createdAt: "asc" },
+        select: { price: true, createdAt: true },
+    });
+    const newest = await prisma.trade.findFirst({
+        where: { symbol, mode: client_1.TradeMode.PAPER },
+        orderBy: { createdAt: "desc" },
+        select: { price: true, createdAt: true },
+    });
+    const oldestMs = oldest ? new Date(oldest.createdAt).getTime() : now;
+    if (oldest && oldestMs <= desiredStartMs) {
+        return;
+    }
+    const endMs = oldest ? oldestMs - stepMs : now - stepMs;
+    const missingMs = endMs - desiredStartMs;
+    if (missingMs <= 0)
+        return;
+    const points = Math.min(maxPoints, Math.ceil(missingMs / stepMs));
+    if (points <= 0)
+        return;
+    let px = clamp(oldest
+        ? Number(oldest.price)
+        : newest
+            ? Number(newest.price)
+            : (cfg.min + cfg.max) / 2, cfg.min, cfg.max);
+    let anchor = px;
+    const tick = cfg.tickOverride ?? 0.0001;
+    const range = Math.max(cfg.max - cfg.min, tick * 120);
+    for (let i = points; i >= 1; i -= 1) {
+        const at = new Date(endMs - (i - 1) * stepMs);
+        const bandPos = (anchor - cfg.min) / range;
+        const sweepBias = (0.5 - bandPos) * range * 0.010;
+        const anchorStep = randn() * range * 0.0018 + sweepBias;
+        anchor = clamp(anchor + anchorStep, cfg.min, cfg.max);
+        px = px * (1 + randn() * 0.00085);
+        px = px + (anchor - px) * 0.11;
+        if (Math.random() < 0.012) {
+            const sign = Math.random() < 0.5 ? -1 : 1;
+            px += sign * tick * randInt(3, 9);
+        }
+        px = clamp(px, cfg.min, cfg.max);
+        await seedHistoricalFilledTrade(symbol, cfg, px, at, userIds);
+    }
+    console.log(`[botFarm] RVAI historical PAPER seed inserted ${points} trades from ${new Date(endMs - (points - 1) * stepMs).toISOString()} to ${new Date(endMs).toISOString()}`);
+}
 async function cleanupSymbolBook(symbol, cfg, mid, nowMs) {
     const midStr = mid.toFixed(8);
     // Delete crossed-looking stale OPEN orders
@@ -445,12 +548,12 @@ async function emitPaperTrade(symbol, cfg, mid, lo, hi, tick, userIds, regime) {
     const isRvai = symbol === "RVAI-USD";
     const wick = isRvai
         ? cfg.wickTicks *
-            (regime === "calm" ? 0.16 : regime === "active" ? 0.24 : 0.34)
+            (regime === "calm" ? 0.12 : regime === "active" ? 0.20 : 0.28)
         : cfg.wickTicks *
             (regime === "calm" ? 0.55 : regime === "active" ? 1.0 : 1.45);
     let pxNum = symbol in ORACLE_PRODUCTS && liveFresh
-        ? live.mid + randn() * tick * wick
-        : mid + randn() * tick * wick;
+        ? live.mid + randn() * tick * (isRvai ? wick * 0.45 : wick)
+        : mid + randn() * tick * (isRvai ? wick * 0.45 : wick);
     const wickOutP = isRvai
         ? regime === "panic"
             ? 0.018
@@ -463,13 +566,13 @@ async function emitPaperTrade(symbol, cfg, mid, lo, hi, tick, userIds, regime) {
                 ? 0.10
                 : 0.06;
     if (Math.random() < wickOutP) {
-        pxNum += randn() * tick * wick * (isRvai ? 0.55 : 2.2);
+        pxNum += randn() * tick * wick * (isRvai ? 0.45 : 2.2);
     }
     if (isRvai) {
         // Pull prints back toward mid so candles don't look like giant synthetic needles
-        pxNum = mid + (pxNum - mid) * 0.68;
+        pxNum = isRvai ? mid + (pxNum - mid) * 0.24 : mid + (pxNum - mid) * 0.68;
         // Hard cap single-trade excursion from current mid
-        const maxTradeDeviation = 0.0028;
+        const maxTradeDeviation = 0.0016;
         pxNum = clamp(pxNum, mid - maxTradeDeviation, mid + maxTradeDeviation);
     }
     pxNum = clamp(pxNum, lo, hi);
@@ -517,6 +620,12 @@ async function startSymbolWorker(symbol, tickDb) {
     if (!cfg)
         return;
     await scrubPaperOutliers(symbol, cfg);
+    {
+        const seedUsers = await getActiveUserIds();
+        if (seedUsers.length >= 2) {
+            await ensureRvaiPaperHistory(symbol, cfg, seedUsers);
+        }
+    }
     const s = await initState(symbol, cfg);
     console.log(`[botFarm] paper synthesizer starting for ${symbol}...`);
     while (true) {
@@ -552,7 +661,7 @@ async function startSymbolWorker(symbol, tickDb) {
             // RVAI-specific sweep bias so it explores the whole band more often
             if (symbol === "RVAI-USD") {
                 const bandPos = (s.anchor - lo) / range; // 0..1
-                const sweepBias = (0.5 - bandPos) * range * 0.035;
+                const sweepBias = (0.5 - bandPos) * range * 0.018;
                 anchorStep += sweepBias;
             }
             s.anchor = clamp(s.anchor + anchorStep, lo, hi);
@@ -575,8 +684,9 @@ async function startSymbolWorker(symbol, tickDb) {
             mid = mid + s.momentum;
             if (symbol === "RVAI-USD") {
                 // Prevent huge intrabar traversals inside one candle bucket
-                const maxStepAbs = 0.0022; // ~0.22 cents per loop
-                mid = clamp(mid, prevMid - maxStepAbs, prevMid + maxStepAbs);
+                const maxStepAbs = 0.0012; // ~0.22 cents per loop
+                const rvaiStepTightener = symbol === "RVAI-USD" ? 0.22 : 1;
+                mid = clamp(mid, prevMid - maxStepAbs * rvaiStepTightener, prevMid + maxStepAbs * rvaiStepTightener);
             }
             // Rare jump shocks
             {
@@ -595,7 +705,7 @@ async function startSymbolWorker(symbol, tickDb) {
             }
             if (symbol === "RVAI-USD") {
                 const rvaiSoftCenter = (lo + hi) / 2;
-                mid = mid + (rvaiSoftCenter - mid) * 0.015;
+                mid = mid + (rvaiSoftCenter - mid) * 0.14;
             }
             mid = clamp(mid, lo, hi);
             s.mid = mid;

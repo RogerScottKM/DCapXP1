@@ -1,2 +1,3 @@
-import AdvisorAptivioSummaryPage from "@/features/advisor/AdvisorAptivioSummaryPage";
+import AdvisorAptivioSummaryPage from "../../../../src/features/advisor/AdvisorAptivioSummaryPage";
+
 export default AdvisorAptivioSummaryPage;

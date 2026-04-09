@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { ApiErrorResponse } from "@dcapx/contracts";
 import { completeKycUpload, presignUpload } from "../../lib/api/uploads";
 import {
@@ -6,6 +7,7 @@ import {
   getMyKycCase,
   type MyKycCaseResponse,
 } from "../../lib/api/kyc";
+import { friendlyPortalError } from "../../lib/api/friendlyError";
 import PortalShell from "../ui/PortalShell";
 
 const DOCUMENT_TYPE_OPTIONS = [
@@ -90,9 +92,7 @@ export default function KycPage() {
         setKycCase(null);
       } else {
         setErrorMessage(
-          maybeApiError?.error?.message ||
-            error?.message ||
-            "Failed to load KYC case."
+          friendlyPortalError(maybeApiError || error, "Failed to load KYC case.")
         );
       }
     } finally {
@@ -115,9 +115,7 @@ export default function KycPage() {
       setSuccessMessage("KYC case created.");
     } catch (error: any) {
       setErrorMessage(
-        error?.error?.message ||
-          error?.message ||
-          "Failed to create KYC case."
+        friendlyPortalError(error, "Failed to create KYC case.")
       );
     } finally {
       setIsCreatingCase(false);
@@ -176,9 +174,7 @@ export default function KycPage() {
       await loadKycCase();
     } catch (error: any) {
       setErrorMessage(
-        error?.error?.message ||
-          error?.message ||
-          "Failed to upload KYC document."
+        friendlyPortalError(error, "Failed to upload KYC document.")
       );
     } finally {
       setIsUploading(false);
@@ -186,6 +182,7 @@ export default function KycPage() {
   }
 
   const hasCase = Boolean(kycCase);
+  const isAuthError = errorMessage === "Please sign in to continue.";
 
   const sortedDocuments = useMemo(() => {
     return [...(kycCase?.documents || [])].sort((a, b) => {
@@ -204,6 +201,15 @@ export default function KycPage() {
         {errorMessage ? messageBox("error", errorMessage) : null}
         {successMessage ? messageBox("success", successMessage) : null}
 
+        {isAuthError ? (
+          <div className="rounded-2xl border border-cyan-300 bg-cyan-50 px-4 py-3 text-sm text-cyan-700 dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-200">
+            Please sign in first to view or create your KYC case.{" "}
+            <Link href="/login" className="font-medium underline">
+              Go to login
+            </Link>
+          </div>
+        ) : null}
+
         {isLoading ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
             <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -212,7 +218,7 @@ export default function KycPage() {
           </div>
         ) : null}
 
-        {!isLoading && !hasCase ? (
+        {!isLoading && !hasCase && !isAuthError ? (
           <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
             <h2 className="text-xl font-semibold tracking-tight">No KYC Case Yet</h2>
             <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">

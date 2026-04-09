@@ -1,0 +1,66 @@
+import type { UtcIsoString } from "./common";
+export type AptivioBand = "VERY_LOW" | "LOW" | "MODERATE" | "HIGH" | "VERY_HIGH";
+export type AptivioSuitabilityStatus = "INSUFFICIENT_DATA" | "PRELIMINARY_MATCH" | "NEEDS_ADVISER_REVIEW" | "CAUTION" | "NOT_ELIGIBLE";
+export type AptivioEligibilityStatus = "NOT_STARTED" | "PENDING" | "ELIGIBLE" | "REVIEW_REQUIRED" | "NOT_ELIGIBLE";
+export interface AptivioDiscussionFlag {
+    code: string;
+    severity: "INFO" | "NOTICE" | "WARNING" | "CRITICAL";
+    title: string;
+    description: string;
+}
+export interface AptivioConversationPrompt {
+    code: string;
+    label: string;
+    prompt: string;
+}
+export interface AptivioProfileSummary {
+    assessmentCode: string;
+    assessmentVersion: number;
+    assessedAtUtc: UtcIsoString;
+    confidenceLevel: "LOW" | "MEDIUM" | "HIGH";
+    scores: {
+        overallReadinessScore: number;
+    };
+    bands: {
+        riskBand: AptivioBand;
+        lossCapacityBand: AptivioBand;
+        liquidityNeedBand: AptivioBand;
+        timeHorizonBand: AptivioBand;
+        knowledgeExperienceBand: AptivioBand;
+        behaviouralStabilityBand: AptivioBand;
+    };
+    suitability: {
+        status: AptivioSuitabilityStatus;
+        rationaleCodes: string[];
+    };
+    eligibility: {
+        aptivioIdStatus: AptivioEligibilityStatus;
+        digitalTwinStatus: AptivioEligibilityStatus;
+    };
+    flags: AptivioDiscussionFlag[];
+    prompts: AptivioConversationPrompt[];
+}
+export interface AdvisorAptivioSummaryResponse {
+    clientId: string;
+    clientDisplayName: string;
+    consent: {
+        canViewSummary: boolean;
+        consentType: "ADVISOR_DATA_SHARING_CONSENT";
+        consentVersion: string | null;
+        consentedAtUtc: UtcIsoString | null;
+    };
+    disclaimer: {
+        title: string;
+        body: string;
+    };
+    summary: AptivioProfileSummary | null;
+    visibility: {
+        rawAnswersVisible: false;
+        perQuestionResponsesVisible: false;
+        scoringFormulaVisible: false;
+    };
+    metadata: {
+        generatedAtUtc: UtcIsoString;
+        source: "APTIVIO_PROFILE";
+    };
+}

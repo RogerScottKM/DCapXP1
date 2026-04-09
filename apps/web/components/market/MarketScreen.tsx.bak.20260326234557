@@ -1,0 +1,620 @@
+"use client";
+
+import React, { useEffect, useMemo, useState,  useRef } from "react";
+
+import CandlesPanel from "@/components/market/CandlesPanel";
+import OpenOrdersPanel from "@/components/market/OpenOrdersPanel";
+import PositionsPanel from "@/components/market/PositionsPanel";
+
+type Mode = "PAPER" | "LIVE";
+
+type OBLevel = { price: string; qty: string };
+type Orderbook = { symbol: string; mode: Mode; bids: OBLevel[]; asks: OBLevel[] };
+
+type Trade = {
+  id?: string;
+  tradeId?: string;
+  symbol: string;
+  price: string;
+  qty: string;
+  createdAt?: string;
+  ts?: string;
+  side?: "BUY" | "SELL";
+};
+ 
+const nf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 8 });
+const pf = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+
+function Panel({
+  title,
+  right,
+  children,
+}: {
+  title: string;
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/80 shadow-[0_0_0_1px_rgba(15,23,42,0.04)] backdrop-blur-md dark:border-slate-800/60 dark:bg-slate-950/40 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.03)]">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800/60">
+        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</div>
+        {right ? <div className="text-xs text-slate-500 dark:text-slate-400">{right}</div> : null}
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  );
+}
+
+function Pill({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs text-slate-700 dark:border-slate-800/60 dark:bg-slate-950/40 dark:text-slate-300">
+      {children}
+    </span>
+  );
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+export default function MarketScreen({ symbol }: { symbol: string }) {
+  const [mode, setMode] = useState<Mode>("PAPER");
+  const [depth, setDepth] = useState(20);
+
+  const [orderbook, setOrderbook] = useState<Orderbook | null>(null);
+  const [trades, setTrades] = useState<Trade[]>([]);
+  const [status, setStatus] = useState<"idle" | "live" | "error">("idle");
+
+  // ticket
+  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+  const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT");
+  const [price, setPrice] = useState("");
+  const [qty, setQty] = useState("");
+  const [placing, setPlacing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const lastPrice = useMemo(() => {
+    const t = trades[0];
+    return t ? Number(t.price) : undefined;
+  }, [trades]);
+
+  const midPrice = useMemo(() => {
+    const bestBid = orderbook?.bids?.[0] ? Number(orderbook.bids[0].price) : undefined;
+    const bestAsk = orderbook?.asks?.[0] ? Number(orderbook.asks[0].price) : undefined;
+    if (bestBid != null && bestAsk != null) return (bestBid + bestAsk) / 2;
+    return lastPrice;
+  }, [orderbook, lastPrice]);
+
+  const hasSnapshotData =
+    (orderbook?.bids?.length ?? 0) > 0 ||
+    (orderbook?.asks?.length ?? 0) > 0 ||
+    trades.length > 0 ||
+    midPrice != null ||
+    lastPrice != null;
+
+  const badgeTone =
+    status === "live"
+      ? "bg-emerald-400"
+      : hasSnapshotData
+        ? "bg-amber-400"
+        : status === "error"
+          ? "bg-rose-400"
+          : "bg-slate-500";
+
+  const badgeLabel =
+    status === "live"
+      ? "LIVE"
+      : hasSnapshotData
+        ? "SNAPSHOT"
+        : status === "error"
+          ? "ERROR"
+          : "IDLE";
+
+  // Apply server snapshot (supports several shapes)
+  const applySnapshot = (raw: any) => {
+    const snap = raw?.data ?? raw; // allow wrapped payloads
+
+    const ob = snap?.orderbook ?? null;
+    const tr = snap?.trades ?? null;
+
+    if (ob) {
+      setOrderbook({
+        symbol,
+        mode,
+        bids: ob?.bids ?? [],
+        asks: ob?.asks ?? [],
+      });
+    }
+
+    if (Array.isArray(tr)) {
+      const items: Trade[] = tr.map((x: any) => ({
+        id: x.id,
+        tradeId: x.tradeId,
+        symbol: x.symbol ?? symbol,
+        price: String(x.price),
+        qty: String(x.qty),
+        createdAt: x.createdAt,
+        ts: x.ts,
+        side: x.side,
+      }));
+      setTrades(items);
+    }
+  };
+
+  async function loadSnapshot() {
+    const [ob, tt] = await Promise.all([
+      fetch(`/api/orderbook/${encodeURIComponent(symbol)}?mode=${mode}&depth=${depth}`, { cache: "no-store" }).then(
+        (r) => r.json()
+      ),
+      fetch(`/api/trades/${encodeURIComponent(symbol)}?mode=${mode}&limit=60`, { cache: "no-store" }).then((r) =>
+        r.json()
+      ),
+    ]);
+
+    setOrderbook({
+      symbol,
+      mode,
+      bids: ob?.bids ?? [],
+      asks: ob?.asks ?? [],
+    });
+
+    const items: Trade[] = (tt?.items ?? tt?.trades ?? []).map((x: any) => ({
+      id: x.id,
+      tradeId: x.tradeId,
+      symbol: x.symbol ?? symbol,
+      price: String(x.price),
+      qty: String(x.qty),
+      createdAt: x.createdAt,
+      ts: x.ts,
+      side: x.side,
+    }));
+    setTrades(items);
+  }
+
+  // 1) Reliable base: snapshot + poll orderbook
+  useEffect(() => {
+    let alive = true;
+
+    loadSnapshot().catch(() => {});
+
+    const t = setInterval(() => {
+      if (!alive) return;
+      fetch(`/api/orderbook/${encodeURIComponent(symbol)}?mode=${mode}&depth=${depth}`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((ob) => {
+          setOrderbook({
+            symbol,
+            mode,
+            bids: ob?.bids ?? [],
+            asks: ob?.asks ?? [],
+          });
+        })
+        .catch(() => {});
+    }, 900);
+
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [symbol, mode, depth]);
+
+  // 2) “Alive” feel: SSE trades + snapshot (does NOT break /api/stream/:symbol)
+  useEffect(() => {
+    setStatus("idle");
+    let es: EventSource | null = null;
+    let opened = false;
+
+    const url = `/api/stream/${encodeURIComponent(symbol)}`;
+
+    try {
+      es = new EventSource(url);
+
+      es.onopen = () => {
+        opened = true;
+        setStatus("live");
+      };
+
+      es.onerror = () => {
+        setStatus("error");
+      };
+
+      es.addEventListener("snapshot", (ev: MessageEvent) => {
+        try {
+          setStatus("live");
+          applySnapshot(JSON.parse(ev.data));
+        } catch {}
+      });
+
+      es.addEventListener("msg", (ev: MessageEvent) => {
+        try {
+          const msg = JSON.parse(ev.data);
+
+          if (msg?.type === "trade") {
+            const t: Trade = {
+              symbol: msg.symbol ?? symbol,
+              price: String(msg.price),
+              qty: String(msg.qty),
+              ts: msg.ts,
+              side: msg.side,
+            };
+            setTrades((prev) => [t, ...prev].slice(0, 80));
+            setStatus("live");
+            return;
+          }
+
+          if (msg?.orderbook || msg?.trades || msg?.data) {
+            setStatus("live");
+            applySnapshot(msg);
+          }
+        } catch {}
+      });
+
+      es.onmessage = (ev: MessageEvent) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data?.orderbook || data?.trades || data?.data) {
+            setStatus("live");
+            applySnapshot(data);
+          }
+        } catch {}
+      };
+
+      const failTimer = setTimeout(() => {
+        if (!opened) setStatus("error");
+      }, 2500);
+
+      return () => {
+        clearTimeout(failTimer);
+        try {
+          es?.close();
+        } catch {}
+      };
+    } catch {
+      setStatus("error");
+      return () => {};
+    }
+  }, [symbol, mode]);
+
+  const maxBidQty = useMemo(
+    () => Math.max(1, ...(orderbook?.bids ?? []).map((x) => Number(x.qty) || 0)),
+    [orderbook]
+  );
+  const maxAskQty = useMemo(
+    () => Math.max(1, ...(orderbook?.asks ?? []).map((x) => Number(x.qty) || 0)),
+    [orderbook]
+  );
+
+  async function place() {
+    setToast(null);
+    setPlacing(true);
+    try {
+                     // --- sanitize + validate qty ---
+const qtyStr = String(qty ?? "").trim();
+const qtyNum = Number(qtyStr.replace(",", ".")); // supports "0,1" input
+
+if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+  setToast("❌ Quantity must be > 0");
+  return;
+}
+
+// --- build body with validated qty ---
+
+const body: any = {
+  mode,
+  symbol,
+  side,
+  type,
+  qty: qtyNum,
+};
+
+/** if (type === "LIMIT") body.price = priceNum;*/
+
+// --- sanitize + validate price if LIMIT ---
+if (type === "LIMIT") {
+  const priceStr = String(price ?? "").trim();
+  const priceNum = Number(priceStr.replace(",", "."));
+
+  if (!Number.isFinite(priceNum) || priceNum <= 0) {
+    setToast("❌ Price must be > 0");
+    return;
+  }
+
+  body.price = priceNum;
+}                   
+
+      const r = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? "Order failed");
+
+      setToast(`✅ Order accepted (${j?.orderId ?? "ok"})`);
+      loadSnapshot().catch(() => {});
+      setQty("");
+    } catch (e: any) {
+      setToast(`❌ ${String(e?.message ?? e)}`);
+    } finally {
+      setPlacing(false);
+      setTimeout(() => setToast(null), 3500);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50 text-slate-900 dark:from-slate-950 dark:via-slate-950 dark:to-indigo-950/20 dark:text-slate-100">
+      <div className="mx-auto max-w-[1400px] space-y-4 px-6 py-6">
+        {/* Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-semibold tracking-tight">{symbol}</h1>
+
+              <Pill>
+                <span className={`h-2 w-2 rounded-full ${badgeTone}`} />
+                <span className="uppercase">{badgeLabel}</span>
+              </Pill>
+
+              <Pill>
+                Mid:{" "}
+                <b className="text-slate-900 dark:text-slate-100">
+                  {midPrice != null ? pf.format(midPrice) : "—"}
+                </b>
+              </Pill>
+
+              <Pill>
+                Last:{" "}
+                <b className="text-slate-900 dark:text-slate-100">
+                  {lastPrice != null ? pf.format(lastPrice) : "—"}
+                </b>
+              </Pill>
+            </div>
+
+            <div className="text-xs text-slate-600 dark:text-slate-400">
+              Agentic-native exchange UI • realtime tape • fee-aware ticket-ready
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <select
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-800/60 dark:bg-slate-950/40 dark:text-slate-100 dark:focus:ring-indigo-400/30"
+              value={mode}
+              onChange={(e) => setMode(e.target.value as Mode)}
+            >
+              <option value="PAPER">PAPER</option>
+              <option value="LIVE">LIVE</option>
+            </select>
+
+            <select
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-800/60 dark:bg-slate-950/40 dark:text-slate-100 dark:focus:ring-indigo-400/30"
+              value={depth}
+              onChange={(e) => setDepth(Number(e.target.value))}
+            >
+              <option value={10}>Depth 10</option>
+              <option value={20}>Depth 20</option>
+              <option value={25}>Depth 25</option>
+              <option value={50}>Depth 50</option>
+            </select>
+
+            <a
+              href="/admin/dashboard"
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 hover:bg-slate-50 dark:border-slate-800/60 dark:bg-slate-950/40 dark:text-slate-100 dark:hover:bg-slate-900/60"
+            >
+              Admin
+            </a>
+          </div>
+        </div>
+
+        {/* Main grid */}
+        <div className="grid grid-cols-12 gap-4">
+          {/* LEFT */}
+          <div className="col-span-12 space-y-4 lg:col-span-7">
+           <CandlesPanel key={`${symbol}-${mode}`} symbol={symbol} mode={mode} /> 
+                      
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+             
+              <OpenOrdersPanel symbol={symbol} />
+              <PositionsPanel />
+
+            </div>
+
+            <Panel title="Agent Co-Pilot (MVP panel)">
+              <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800/60 dark:bg-slate-950/30">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Risk guardrails</div>
+                  <div className="mt-1 font-medium text-slate-900 dark:text-slate-100">Fat-finger bands: ON</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Slippage cap applies to MARKET</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800/60 dark:bg-slate-950/30">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Suggested action</div>
+                  <div className="mt-1 font-medium text-slate-900 dark:text-slate-100">Add ladder orders</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">TWAP/VWAP buttons next</div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white/70 p-3 dark:border-slate-800/60 dark:bg-slate-950/30">
+                  <div className="text-xs text-slate-500 dark:text-slate-400">Autopilot</div>
+                  <div className="mt-1 font-medium text-slate-900 dark:text-slate-100">OFF</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Enable after API keys + RBAC</div>
+                </div>
+              </div>
+            </Panel>
+          </div>
+
+          {/* MIDDLE */}
+          <div className="col-span-12 space-y-4 lg:col-span-3">
+            <Panel title="Orderbook">
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                {/* Bids */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-slate-500 dark:text-slate-400">
+                    <span>Bids</span>
+                    <span>Qty</span>
+                  </div>
+                  <div className="max-h-[360px] space-y-1 overflow-auto pr-1">
+                    {(orderbook?.bids ?? []).slice(0, depth).map((x, i) => {
+                      const q = Number(x.qty) || 0;
+                      const w = clamp((q / maxBidQty) * 100, 0, 100);
+                      return (
+                        <div
+                          key={`b-${i}`}
+                          className="relative rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1 dark:border-slate-900/30 dark:bg-slate-950/20"
+                        >
+                          <div className="absolute inset-y-0 right-0 rounded-lg bg-emerald-500/10" style={{ width: `${w}%` }} />
+                          <div className="relative flex items-center justify-between">
+                            <span className="font-medium text-emerald-600 dark:text-emerald-300">
+                              {pf.format(Number(x.price) || 0)}
+                            </span>
+                            <span className="text-slate-700 dark:text-slate-300">{nf.format(q)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Asks */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between text-slate-500 dark:text-slate-400">
+                    <span>Asks</span>
+                    <span>Qty</span>
+                  </div>
+                  <div className="max-h-[360px] space-y-1 overflow-auto pr-1">
+                    {(orderbook?.asks ?? []).slice(0, depth).map((x, i) => {
+                      const q = Number(x.qty) || 0;
+                      const w = clamp((q / maxAskQty) * 100, 0, 100);
+                      return (
+                        <div
+                          key={`a-${i}`}
+                          className="relative rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1 dark:border-slate-900/30 dark:bg-slate-950/20"
+                        >
+                          <div className="absolute inset-y-0 left-0 rounded-lg bg-rose-500/10" style={{ width: `${w}%` }} />
+                          <div className="relative flex items-center justify-between">
+                            <span className="font-medium text-rose-600 dark:text-rose-300">
+                              {pf.format(Number(x.price) || 0)}
+                            </span>
+                            <span className="text-slate-700 dark:text-slate-300">{nf.format(q)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 text-xs text-slate-600 dark:text-slate-400">
+                Best bid: <b className="text-slate-900 dark:text-slate-200">{orderbook?.bids?.[0]?.price ?? "—"}</b> · Best
+                ask: <b className="text-slate-900 dark:text-slate-200">{orderbook?.asks?.[0]?.price ?? "—"}</b>
+              </div>
+            </Panel>
+
+            <Panel title="Trades (tape)" right={<span>{mode}</span>}>
+              <div className="max-h-[320px] space-y-1 overflow-auto pr-1 text-xs">
+                {trades.slice(0, 50).map((t, i) => {
+                  const p = Number(t.price) || 0;
+                  const q = Number(t.qty) || 0;
+                  return (
+                    <div
+                      key={`t-${i}`}
+                      className="flex items-center justify-between rounded-lg border border-slate-200/70 bg-white/60 px-2 py-1 dark:border-slate-900/30 dark:bg-slate-950/20"
+                    >
+                      <span className="font-medium text-slate-900 dark:text-slate-200">{pf.format(p)}</span>
+                      <span className="text-slate-600 dark:text-slate-400">{nf.format(q)}</span>
+                      <span className="text-slate-500 dark:text-slate-500">{(t.createdAt ?? t.ts ?? "").slice(11, 19)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Panel>
+          </div>
+
+          {/* RIGHT */}
+          <div className="col-span-12 space-y-4 lg:col-span-2">
+            <Panel title="Order Ticket">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <button
+                  className={`rounded-xl border px-3 py-2 ${
+                    side === "BUY"
+                      ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                      : "border-slate-200 bg-white/60 text-slate-700 dark:border-slate-800/60 dark:bg-slate-950/30 dark:text-slate-300"
+                  }`}
+                  onClick={() => setSide("BUY")}
+                >
+                  Buy
+                </button>
+
+                <button
+                  className={`rounded-xl border px-3 py-2 ${
+                    side === "SELL"
+                      ? "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-200"
+                      : "border-slate-200 bg-white/60 text-slate-700 dark:border-slate-800/60 dark:bg-slate-950/30 dark:text-slate-300"
+                  }`}
+                  onClick={() => setSide("SELL")}
+                >
+                  Sell
+                </button>
+
+                <select
+                  className="col-span-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-800/60 dark:bg-slate-950/30 dark:text-slate-100 dark:focus:ring-indigo-400/30"
+                  value={type}
+                  onChange={(e) => setType(e.target.value as any)}
+                >
+                  <option value="LIMIT">LIMIT</option>
+                  <option value="MARKET">MARKET</option>
+                </select>
+
+                <div className="col-span-2 space-y-1">
+                  <div className="text-xs text-slate-600 dark:text-slate-400">Price</div>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-800/60 dark:bg-slate-950/30 dark:text-slate-100 dark:focus:ring-indigo-400/30"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    placeholder={midPrice != null ? String(pf.format(midPrice)) : "0.00"}
+                    disabled={type === "MARKET"}
+                  />
+                </div>
+
+                <div className="col-span-2 space-y-1">
+                  <div className="text-xs text-slate-600 dark:text-slate-400">Quantity</div>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500/30 dark:border-slate-800/60 dark:bg-slate-950/30 dark:text-slate-100 dark:focus:ring-indigo-400/30"
+                    value={qty}
+                    onChange={(e) => setQty(e.target.value)}
+                    placeholder="0"
+                  />
+                </div>
+
+                <button
+                  className={`col-span-2 rounded-xl border px-3 py-2 font-semibold hover:bg-slate-50 disabled:opacity-50 dark:hover:bg-slate-900/40 ${
+                    side === "BUY"
+                      ? "border-emerald-500/40 bg-emerald-500/20 text-emerald-700 dark:text-emerald-200"
+                      : "border-rose-500/40 bg-rose-500/20 text-rose-700 dark:text-rose-200"
+                  }`}
+                  disabled={placing}
+                  onClick={place}
+                >
+                  {placing ? "Placing…" : `Place ${side}`}
+                </button>
+
+                {toast ? (
+                  <div className="col-span-2 rounded-xl border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-900 dark:border-slate-800/60 dark:bg-slate-950/30 dark:text-slate-200">
+                    {toast}
+                  </div>
+                ) : (
+                  <div className="col-span-2 text-xs text-slate-500 dark:text-slate-500">
+                    Tip: clicking a book level can auto-fill price next (easy UX win).
+                  </div>
+                )}
+              </div>
+            </Panel>
+
+            <Panel title="Pro feel (next 2 UI wins)">
+              <div className="space-y-2 text-xs text-slate-600 dark:text-slate-400">
+                <div>1) Candlesticks + timeframe selector ✅</div>
+                <div>2) Open Orders + Positions under chart ✅</div>
+              </div>
+            </Panel>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}

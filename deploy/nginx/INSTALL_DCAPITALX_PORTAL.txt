@@ -1,0 +1,32 @@
+1) Rebuild and restart web + api:
+   docker compose build web api --no-cache
+   docker compose up -d web api
+
+2) Find your live nginx site file, commonly one of:
+   /etc/nginx/sites-available/dcapitalx.com
+   /etc/nginx/sites-available/default
+
+3) Paste the contents of:
+   deploy/nginx/dcapitalx.portal.locations.conf
+
+   inside the active server block for:
+   server_name dcapitalx.com www.dcapitalx.com;
+
+4) Test nginx:
+   sudo nginx -t
+
+5) Reload nginx:
+   sudo systemctl reload nginx
+
+6) Test:
+   curl -i http://127.0.0.1:4010/health
+   curl -i https://dcapitalx.com/backend-api/health
+   curl -I https://dcapitalx.com/onboarding
+   curl -I https://dcapitalx.com/kyc
+
+7) Browser checks:
+   https://dcapitalx.com/login
+   https://dcapitalx.com/app/onboarding
+   https://dcapitalx.com/app/kyc
+   https://dcapitalx.com/markets/BTC-USD
+   https://dcapitalx.com/markets/RVAI-USD

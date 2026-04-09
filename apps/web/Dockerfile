@@ -1,52 +1,50 @@
-# apps/web/Dockerfile
-
-########################
-# 1) Builder
-########################
 FROM node:18-bookworm-slim AS builder
+
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@10.20.0 --activate
 
+ARG NEXT_PUBLIC_API_BASE_URL=/backend-api
+ARG API_INTERNAL_URL=http://api:4010
+
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ENV API_INTERNAL_URL=${API_INTERNAL_URL}
+
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/schema/package.json packages/schema/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
 
 RUN pnpm install --frozen-lockfile
 
-COPY packages/schema packages/schema
 COPY apps/web apps/web
+COPY packages/schema packages/schema
+COPY packages/contracts packages/contracts
 
-RUN pnpm --filter @repo/schema build
+RUN pnpm --filter @dcapx/contracts build
+RUN pnpm --filter @repo/schema build || true
 RUN pnpm --filter web build
 
-########################
-# 2) Runner
-########################
-########################
-# 2) Runner
-########################
 FROM node:18-bookworm-slim AS runner
+
 WORKDIR /app
 
+RUN corepack enable && corepack prepare pnpm@10.20.0 --activate
+
+ARG NEXT_PUBLIC_API_BASE_URL=/backend-api
+ARG API_INTERNAL_URL=http://api:4010
+
 ENV NODE_ENV=production
-ENV PORT=3000
-ENV HOSTNAME=0.0.0.0
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ENV API_INTERNAL_URL=${API_INTERNAL_URL}
 
-# Standalone output
-COPY --from=builder /app/apps/web/.next/standalone /app
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/apps/web ./apps/web
+COPY --from=builder /app/packages/schema ./packages/schema
+COPY --from=builder /app/packages/contracts ./packages/contracts
 
-# ✅ Put static where server.js (in /app/apps/web) expects it
-COPY --from=builder /app/apps/web/.next/static /app/apps/web/.next/static
-
-# ✅ Also keep root copy (harmless, helps if Next expects root)
-COPY --from=builder /app/apps/web/.next/static /app/.next/static
-
-# ✅ Public where server.js expects it
-COPY --from=builder /app/apps/web/public /app/apps/web/public
-
-# ✅ Also keep root public
-COPY --from=builder /app/apps/web/public /app/public
-
+WORKDIR /app/apps/web
 EXPOSE 3000
-CMD ["node", "/app/apps/web/server.js"]
+
+CMD ["pnpm", "start"]

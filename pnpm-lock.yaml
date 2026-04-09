@@ -18,6 +18,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@dcapx/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@prisma/client':
         specifier: ^6.19.0
         version: 6.19.0(prisma@6.19.0(typescript@5.9.3))(typescript@5.9.3)
@@ -67,9 +70,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@dcapx/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@repo/schema':
         specifier: workspace:*
         version: link:../../packages/schema
+      country-list:
+        specifier: ^2.4.1
+        version: 2.4.1
       lightweight-charts:
         specifier: ^4.2.3
         version: 4.2.3
@@ -103,6 +112,12 @@ importers:
         version: 3.4.18(tsx@4.20.6)
       typescript:
         specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/contracts:
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
         version: 5.9.3
 
   packages/schema:
@@ -681,6 +696,9 @@ packages:
   cors@2.8.5:
     resolution: {integrity: sha512-KIHbLJqu73RGr/hnbrO9uBeixNGuvSQjul/jdFvS/KFSIH1hWVd1ng7zOHx+YrEfInLG7q4n6GHQ9cDtxv/P6g==}
     engines: {node: '>= 0.10'}
+
+  country-list@2.4.1:
+    resolution: {integrity: sha512-KhVV/UfUV3dSNpsWIqHTQxLpYDKPKz1UwkRjadt+YbX2PRhyCEihEoS5XgB7J7AMXpkicvl+tRHvkNI5wbji/g==}
 
   create-require@1.1.1:
     resolution: {integrity: sha512-dcKFX3jn0MpIaXjisoRvexIJVEKzaq7z2rZKxf+MSr9TkdmHmsU4m2lcLojrj/FHl8mk5VxMmYA+ftRkP/3oKQ==}
@@ -2088,6 +2106,8 @@ snapshots:
     dependencies:
       object-assign: 4.1.1
       vary: 1.1.2
+
+  country-list@2.4.1: {}
 
   create-require@1.1.1: {}
 

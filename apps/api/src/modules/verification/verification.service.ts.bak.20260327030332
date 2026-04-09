@@ -1,0 +1,144 @@
+import argon2 from "argon2";
+import { prisma } from "../../lib/prisma";
+import { notificationService } from "../notifications/notification.service";
+import { notificationsConfig } from "../notifications/notifications.config";
+import {
+  addMinutes,
+  generateOpaqueToken,
+  generateOtpCode,
+  hashForStorage,
+  maskEmail,
+  normalizeEmail,
+} from "./verification.utils";
+
+export class VerificationService {
+  async requestEmailVerification(emailInput: string) {
+    const email = normalizeEmail(emailInput);
+
+    const user = await prisma.user.findFirst({
+      where: { email },
+    });
+
+    if (!user) {
+      return { ok: true, message: "If an account exists, a verification email has been sent." };
+    }
+
+    if ((user as any).emailVerifiedAt) {
+      return { ok: true, message: "Email already verified." };
+    }
+
+    await prisma.verificationChallenge.updateMany({
+      where: {
+        userId: user.id,
+        channel: "EMAIL",
+        purpose: "CONTACT_VERIFY",
+        status: "PENDING",
+      },
+      data: {
+        status: "CANCELLED",
+      },
+    });
+
+    const code = generateOtpCode();
+    const destinationHash = hashForStorage(email);
+    const codeHash = hashForStorage(code);
+
+    const challenge = await prisma.verificationChallenge.create({
+      data: {
+        userId: user.id,
+        channel: "EMAIL",
+        purpose: "CONTACT_VERIFY",
+        destinationMasked: maskEmail(email),
+        destinationHash,
+        codeHash,
+        expiresAt: addMinutes(notificationsConfig.verificationOtpMinutes),
+        maxAttempts: 5,
+        status: "PENDING",
+      },
+    });
+
+    await notificationService.sendVerificationOtpEmail({
+      userId: user.id,
+      to: email,
+      code,
+    });
+
+    return {
+      ok: true,
+      message: "If an account exists, a verification email has been sent.",
+      challengeId: challenge.id,
+    };
+  }
+
+  async confirmEmailVerification(emailInput: string, codeInput: string) {
+    const email = normalizeEmail(emailInput);
+    const destinationHash = hashForStorage(email);
+    const codeHash = hashForStorage(codeInput.trim());
+
+    const challenge = await prisma.verificationChallenge.findFirst({
+      where: {
+        channel: "EMAIL",
+        purpose: "CONTACT_VERIFY",
+        destinationHash,
+        status: "PENDING",
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!challenge) {
+      throw new Error("Invalid or expired verification code.");
+    }
+
+    const now = new Date();
+
+    if (challenge.expiresAt <= now) {
+      await prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: { status: "EXPIRED" },
+      });
+      throw new Error("Invalid or expired verification code.");
+    }
+
+    if (challenge.attemptCount >= challenge.maxAttempts) {
+      await prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: { status: "LOCKED" },
+      });
+      throw new Error("Too many verification attempts. Request a new code.");
+    }
+
+    if (challenge.codeHash !== codeHash) {
+      const nextAttempts = challenge.attemptCount + 1;
+      await prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          attemptCount: nextAttempts,
+          status: nextAttempts >= challenge.maxAttempts ? "LOCKED" : "PENDING",
+        },
+      });
+      throw new Error("Invalid or expired verification code.");
+    }
+
+    await prisma.$transaction([
+      prisma.verificationChallenge.update({
+        where: { id: challenge.id },
+        data: {
+          consumedAt: now,
+          status: "VERIFIED",
+        },
+      }),
+      prisma.user.update({
+        where: { id: challenge.userId },
+        data: { passwordHash: passwordHash },
+      }),
+      prisma.user.update({
+        where: { id: challenge.userId },
+        data: { passwordHash },
+      }),
+    ]);
+
+    return { ok: true, message: "Password reset successfully." };
+  }
+}
+
+export const verificationService = new VerificationService();

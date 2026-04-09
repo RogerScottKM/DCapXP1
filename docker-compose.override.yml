@@ -1,0 +1,13 @@
+services:
+  api:
+    environment:
+      PORT: 4010
+
+  web:
+    build:
+      args:
+        NEXT_PUBLIC_API_BASE_URL: /backend-api
+        API_INTERNAL_URL: http://api:4010
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: /backend-api
+      API_INTERNAL_URL: http://api:4010

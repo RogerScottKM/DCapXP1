@@ -48,11 +48,6 @@ function buildCandlesFromTradesWindow(
   candleLimit: number
 ) {
   const bucketMs = periodSec * 1000;
-  const endB = toMsBucket(endMs, periodSec);
-  const startB = endB - (candleLimit - 1) * bucketMs;
-
-  // bucket -> OHLCV
-  const m = new Map<number, { t: number; o: number; h: number; l: number; c: number; v: number }>();
 
   const rows = (trades ?? [])
     .map((t) => {
@@ -63,9 +58,25 @@ function buildCandlesFromTradesWindow(
     .filter((x) => Number.isFinite(x.ms) && Number.isFinite(x.price) && Number.isFinite(x.qty))
     .sort((a, b) => a.ms - b.ms);
 
+  if (!rows.length) return [];
+
+  const lastTradeMs = rows[rows.length - 1].ms;
+  const endB = toMsBucket(lastTradeMs, periodSec);
+  const startB = endB - (candleLimit - 1) * bucketMs;
+
+  console.log("[buildCandlesFromTradesWindow]", {
+    trades: rows.length,
+    firstTrade: rows[0]?.ms,
+    lastTrade: rows[rows.length - 1]?.ms,
+    startB,
+    endB,
+  });
+
+  // bucket -> OHLCV
+  const m = new Map<number, { t: number; o: number; h: number; l: number; c: number; v: number }>();
+
   for (const r of rows) {
     const b = toMsBucket(r.ms, periodSec);
-    // keep only buckets inside the requested window (optional but faster)
     if (b < startB || b > endB) continue;
 
     const cur = m.get(b);
@@ -79,7 +90,6 @@ function buildCandlesFromTradesWindow(
     }
   }
 
-  // seed price so we can fill leading gaps
   const first = Array.from(m.values()).sort((a, b) => a.t - b.t)[0];
   let lastClose: number | null = first?.o ?? null;
 
@@ -95,9 +105,9 @@ function buildCandlesFromTradesWindow(
     }
   }
 
-  // ensure exact length (safety)
   return out.slice(-candleLimit);
 }
+
 
 async function fetchCoinbaseCandles(symbol: string, period: string) {
   const granularity = PERIOD_SEC[period];
@@ -187,19 +197,30 @@ export async function GET(req: Request, ctx: { params: { symbol: string } }) {
   const mode = (u.searchParams.get("mode") ?? "LIVE").toUpperCase();
   const source = (u.searchParams.get("source") ?? "auto").toLowerCase();
 
-  const candleLimit = Math.min(Number(u.searchParams.get("limit") ?? "300") || 300, 2000); // cap for sanity
+const isRvaiPaper = symbol === "RVAI-USD" && mode === "PAPER";
 
-/*  const limit = Math.min(Number(u.searchParams.get("limit") ?? "5000") || 5000, 20000);*/
+const requestedLimit = Number(u.searchParams.get("limit") ?? (isRvaiPaper ? "3000" : "300"));
 
-  const sec = PERIOD_SEC[period];
-  if (!sec) {
-    return NextResponse.json({ ok: false, error: "Bad period" }, { status: 400 });
-  }
-  const endMs = Date.now();
-  const startMs = endMs - candleLimit * sec * 1000;
+const candleLimit = Math.min(
+  Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? requestedLimit
+    : (isRvaiPaper ? 3000 : 300),
+  isRvaiPaper ? 4000 : 2000
+);
 
-  // heuristic trade limit (cap hard so we don't DOS ourselves)
-  const tradeLimit = Math.min(Math.max(candleLimit * 200, 2000), 20000);
+const sec = PERIOD_SEC[period];
+if (!sec) {
+  return NextResponse.json({ ok: false, error: "Bad period" }, { status: 400 });
+}
+
+const endMs = Date.now();
+const startMs = endMs - candleLimit * sec * 1000;
+
+// For RVAI PAPER, allow a much larger trade window so seeded history is not truncated away
+const tradeLimit = isRvaiPaper
+  ? 120000
+  : Math.min(Math.max(candleLimit * 200, 2000), 20000);
+
 
   // AUTO / Coinbase
   if (source === "coinbase" || source === "auto") {

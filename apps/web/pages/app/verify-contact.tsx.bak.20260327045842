@@ -1,0 +1,3 @@
+import VerifyContactPage from "../../src/features/auth/VerifyContactPage";
+
+export default VerifyContactPage;

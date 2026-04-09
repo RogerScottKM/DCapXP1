@@ -158,6 +158,17 @@ enum KycDecisionCode {
   REQUEST_INFO
 }
 
+enum VerificationChannel {
+  EMAIL
+  SMS
+}
+
+enum VerificationPurpose {
+  CONTACT_VERIFICATION
+  PASSWORD_RESET
+  MFA
+}
+
 enum PaymentMethodType {
   BANK_ACCOUNT
   STRIPE_CUSTOMER
@@ -316,6 +327,56 @@ enum ConsentType {
   ADVISOR_DATA_SHARING_CONSENT
 }
 
+// ======== enum >> referral >> MLM
+
+enum ReferralCodeStatus {
+  ACTIVE
+  DISABLED
+  EXPIRED
+}
+
+enum ReferralAttributionStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  CANCELLED
+}
+
+enum ReferralApplySource {
+  LOGIN
+  ONBOARDING
+  INVITATION
+  REGISTER
+  ADMIN
+  IMPORT
+}
+
+enum RewardUnitType {
+  POINTS
+  CASH
+  TOKEN
+  PROFIT_SHARE
+  STOCK_OPTION
+}
+
+enum RewardEntryType {
+  ACCRUAL
+  ADJUSTMENT
+  REDEMPTION
+  REVERSAL
+}
+
+enum RewardSourceType {
+  REFERRAL_CODE_APPLIED
+  REFERRAL_SIGNUP
+  REFERRAL_CONTACT_VERIFIED
+  REFERRAL_KYC_APPROVED
+  REFERRAL_FIRST_FUNDING
+  REFERRAL_FIRST_TRADE
+  MANUAL_BONUS
+  CAMPAIGN_BONUS
+}
+
 // =====================================================
 // Core exchange (preserved)
 // =====================================================
@@ -371,43 +432,79 @@ model Trade {
 // Identity / user (merged: old + new)
 // =====================================================
 model User {
-  id                   String                    @id @default(cuid())
-  email                String                    @unique
-  username             String                    @unique
-  passwordHash         String
-  totpSecret           String?
+  emailVerifiedAt        DateTime?
+  phoneVerifiedAt        DateTime?
+  verificationChallenges VerificationChallenge[]
+  notificationDeliveries NotificationDelivery[]
+  id                     String                    @id @default(cuid())
+  email                  String                    @unique
+  username               String                    @unique
+  passwordHash           String
+  totpSecret             String?
   // new Phase 1 fields
-  phone                String?                   @unique
-  status               UserStatus                @default(REGISTERED)
-  emailVerifiedAt      DateTime?
-  phoneVerifiedAt      DateTime?
-  createdAt            DateTime                  @default(now())
-  updatedAt            DateTime                  @updatedAt
+  phone                  String?                   @unique
+  status                 UserStatus                @default(REGISTERED)
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
   // existing relations
-  kyc                  Kyc?
-  balances             Balance[]
-  orders               Order[]
-  digitalTwinProfile   DigitalTwinProfile?
-  twinAgentAssignments TwinAgentAssignment[]
-  agents               Agent[]
+  kyc                    Kyc?
+  balances               Balance[]
+  orders                 Order[]
+  digitalTwinProfile     DigitalTwinProfile?
+  twinAgentAssignments   TwinAgentAssignment[]
+  agents                 Agent[]
   // new Phase 1 relations
-  profile              UserProfile?
-  sessions             Session[]
-  otpChallenges        OtpChallenge[]
-  mfaFactors           MfaFactor[]
-  roles                RoleAssignment[]
-  consents             ConsentRecord[]
-  kycCases             KycCase[]
-  paymentMethods       PaymentMethod[]
-  wallets              Wallet[]
-  whitelist            WalletWhitelistEntry[]
-  aptivioProfile       AptivioProfile?
-  advisorProfile       AdvisorProfile?
-  advisorClients       AdvisorClientAssignment[] @relation("AdvisorAssignments")
-  clientAdvisors       AdvisorClientAssignment[] @relation("ClientAssignments")
-  assessmentRuns       AssessmentRun[]
+  profile                UserProfile?
+  sessions               Session[]
+  otpChallenges          OtpChallenge[]
+  mfaFactors             MfaFactor[]
+  roles                  RoleAssignment[]
+  consents               ConsentRecord[]
+  kycCases               KycCase[]
+  paymentMethods         PaymentMethod[]
+  wallets                Wallet[]
+  whitelist              WalletWhitelistEntry[]
+  aptivioProfile         AptivioProfile?
+  advisorProfile         AdvisorProfile?
+  advisorClients         AdvisorClientAssignment[] @relation("AdvisorAssignments")
+  clientAdvisors         AdvisorClientAssignment[] @relation("ClientAssignments")
+  assessmentRuns         AssessmentRun[]
+  passwordResetTokens    PasswordResetToken[]
+  verificationCodes      VerificationCode[]
+
+  // =======================================================
+  //             Referral >> Future MLM 
+  // =======================================================
+
+  referredByCodeInput String?
+  acquisitionSource   String?
+
+  referralCodesOwned  ReferralCode[]        @relation("ReferralCodeOwner")
+  referralAttribution ReferralAttribution?  @relation("ReferredUser")
+  referralsGenerated  ReferralAttribution[] @relation("ReferralReferrer")
+  rewardLedgerEntries RewardLedgerEntry[]
+  rewardBalances      UserRewardBalance[]
 
   @@index([status])
+}
+
+// ================================
+
+model VerificationCode {
+  id          String              @id @default(cuid())
+  userId      String
+  channel     VerificationChannel
+  purpose     VerificationPurpose
+  destination String
+  codeHash    String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, channel, expiresAt])
+  @@index([destination, purpose, channel, expiresAt])
 }
 
 // =====================================================
@@ -900,6 +997,32 @@ model AdvisorClientAssignment {
 }
 
 // =====================================================
+// Invitation
+// =====================================================
+
+model Invitation {
+  id                    String           @id @default(cuid())
+  tokenHash             String           @unique
+  email                 String
+  invitationType        InvitationType
+  targetRoleCode        String
+  invitedByUserId       String
+  partnerOrganizationId String?
+  advisorUserId         String?
+  status                InvitationStatus @default(PENDING)
+  expiresAt             DateTime
+  acceptedAt            DateTime?
+  acceptedUserId        String?
+  metadata              Json?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @default(now()) @updatedAt
+
+  @@index([email, status])
+  @@index([partnerOrganizationId, status])
+  @@index([advisorUserId, status])
+}
+
+// =====================================================
 // Aptivio catalog / profiles / identity
 // =====================================================
 model AptitudeDefinition {
@@ -1047,4 +1170,156 @@ model AuditEvent {
   @@index([actorType, actorId])
   @@index([resourceType, resourceId])
   @@index([action, createdAt])
+}
+
+// ============================================================
+//            Password Reset
+// ============================================================
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+// ==============================================================
+//               Referral >> MLM >> Reward Points
+// ==============================================================
+
+model ReferralCode {
+  id           String             @id @default(cuid())
+  code         String             @unique
+  ownerUserId  String
+  status       ReferralCodeStatus @default(ACTIVE)
+  campaignKey  String?
+  communityKey String?
+  regionKey    String?
+  metadata     Json?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @default(now()) @updatedAt
+
+  owner        User                  @relation("ReferralCodeOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  attributions ReferralAttribution[]
+
+  @@index([ownerUserId, status])
+  @@index([campaignKey, status])
+  @@index([communityKey, status])
+  @@index([regionKey, status])
+}
+
+model ReferralAttribution {
+  id              String                    @id @default(cuid())
+  referredUserId  String                    @unique
+  referralCodeId  String
+  referrerUserId  String
+  status          ReferralAttributionStatus @default(PENDING)
+  applySource     ReferralApplySource?
+  attributedAt    DateTime                  @default(now())
+  confirmedAt     DateTime?
+  communityKey    String?
+  regionKey       String?
+  lineageSnapshot Json?
+  metadata        Json?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @default(now()) @updatedAt
+
+  referredUser  User                @relation("ReferredUser", fields: [referredUserId], references: [id], onDelete: Cascade)
+  referralCode  ReferralCode        @relation(fields: [referralCodeId], references: [id], onDelete: Restrict)
+  referrer      User                @relation("ReferralReferrer", fields: [referrerUserId], references: [id], onDelete: Restrict)
+  rewardEntries RewardLedgerEntry[]
+
+  @@index([referrerUserId, status])
+  @@index([referralCodeId, status])
+  @@index([communityKey, status])
+  @@index([regionKey, status])
+}
+
+model RewardLedgerEntry {
+  id            String           @id @default(cuid())
+  userId        String
+  attributionId String?
+  unitType      RewardUnitType
+  entryType     RewardEntryType
+  sourceType    RewardSourceType
+  amount        Decimal          @db.Decimal(18, 4)
+  currencyCode  String?
+  description   String?
+  effectiveAt   DateTime         @default(now())
+  metadata      Json?
+  createdAt     DateTime         @default(now())
+
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attribution ReferralAttribution? @relation(fields: [attributionId], references: [id], onDelete: SetNull)
+
+  @@index([userId, unitType, effectiveAt])
+  @@index([attributionId, sourceType])
+}
+
+model UserRewardBalance {
+  id        String         @id @default(cuid())
+  userId    String
+  unitType  RewardUnitType
+  balance   Decimal        @db.Decimal(18, 4)
+  updatedAt DateTime       @default(now()) @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, unitType])
+}
+
+enum VerificationStatus {
+  PENDING
+  VERIFIED
+  EXPIRED
+  LOCKED
+  CANCELLED
+}
+
+model VerificationChallenge {
+  id                String              @id @default(cuid())
+  userId            String
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  channel           VerificationChannel
+  purpose           VerificationPurpose
+  destinationMasked String
+  destinationHash   String
+  codeHash          String
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  attemptCount      Int                 @default(0)
+  maxAttempts       Int                 @default(5)
+  status            VerificationStatus  @default(PENDING)
+  providerMessageId String?
+  metadata          Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([userId, channel, purpose, status])
+  @@index([destinationHash, purpose, status])
+}
+
+model NotificationDelivery {
+  id                String              @id @default(cuid())
+  userId            String?
+  user              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  channel           VerificationChannel
+  templateKey       String
+  provider          String
+  destinationMasked String
+  providerMessageId String?
+  status            String
+  errorCode         String?
+  errorMessage      String?
+  metadata          Json?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([userId, channel, templateKey, status])
 }

@@ -4,58 +4,44 @@ export async function GET(req: Request, ctx: { params: { symbol: string } }) {
   const base = process.env.API_INTERNAL_URL ?? "http://api:4010";
   const url = new URL(req.url);
 
-  // Keep mode for UI compatibility, but DO NOT forward it to /api/v1/market/*
-  // (market routes may validate query strictly).
-  const _mode = url.searchParams.get("mode") ?? "PAPER";
-
-  const limit = url.searchParams.get("limit") ?? "60";
   const symbol = ctx.params.symbol;
+  const limit = url.searchParams.get("limit") ?? "50";
+  const mode = url.searchParams.get("mode") ?? "PAPER";
 
-  const upstream = new URL(`${base}/api/v1/market/trades`);
+  const upstream = new URL(`${base}/v1/market/trades`);
   upstream.searchParams.set("symbol", symbol);
   upstream.searchParams.set("limit", limit);
+  upstream.searchParams.set("mode", mode);
 
   const r = await fetch(upstream.toString(), { cache: "no-store" });
-
-  const contentType = r.headers.get("content-type") ?? "";
   const raw = await r.text();
 
-  // Defensive parsing: if upstream ever returns HTML (404 etc), return a helpful JSON payload.
   let data: any;
-  if (contentType.includes("application/json")) {
-    try {
-      data = JSON.parse(raw);
-    } catch {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Upstream returned invalid JSON",
-          upstreamUrl: upstream.toString(),
-          upstreamStatus: r.status,
-          upstreamContentType: contentType,
-          upstreamBodyPreview: raw.slice(0, 1200),
-        },
-        { status: 502 }
-      );
-    }
-  } else {
+  try {
+    data = JSON.parse(raw);
+  } catch {
     return NextResponse.json(
       {
         ok: false,
-        error: "Upstream did not return JSON",
+        error: "Upstream returned non-JSON for trades",
         upstreamUrl: upstream.toString(),
         upstreamStatus: r.status,
-        upstreamContentType: contentType,
-        upstreamBodyPreview: raw.slice(0, 1200),
+        upstreamBodyPreview: raw.slice(0, 1000),
       },
       { status: 502 }
     );
   }
 
-  // UI convenience: some components expect `items` as an alias of `trades`
-  if (data && Array.isArray(data.trades) && !Array.isArray(data.items)) {
-    data.items = data.trades;
-  }
-
-  return NextResponse.json(data, { status: r.status });
+  const trades = Array.isArray(data.trades) ? data.trades : [];
+  return NextResponse.json(
+    {
+      ok: true,
+      symbol,
+      mode,
+      trades,
+      items: trades,
+      limit: Number(limit),
+    },
+    { status: 200 }
+  );
 }

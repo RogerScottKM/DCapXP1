@@ -1,4 +1,5 @@
 import argon2 from "argon2";
+import crypto from "crypto";
 import type { Request, Response } from "express";
 import { prisma } from "../../lib/prisma";
 import { withTx } from "../../lib/service/tx";
@@ -51,6 +52,24 @@ type LoginRequestBody = {
   password?: string;
 };
 
+type RequestPasswordResetBody = {
+  email?: string;
+};
+
+type ResetPasswordBody = {
+  token?: string;
+  newPassword?: string;
+};
+
+type SendOtpBody = {
+  channel?: "EMAIL" | "SMS";
+};
+
+type VerifyOtpBody = {
+  channel?: "EMAIL" | "SMS";
+  code?: string;
+};
+
 class AuthService {
   async login(req: Request, res: Response, body: LoginRequestBody) {
     const identifier = body?.identifier?.trim();
@@ -70,10 +89,7 @@ class AuthService {
 
     const user = await prisma.user.findFirst({
       where: {
-        OR: [
-          { email: identifier.toLowerCase() },
-          { username: identifier },
-        ],
+        OR: [{ email: identifier.toLowerCase() }, { username: identifier }],
       },
       include: {
         profile: true,
@@ -212,6 +228,286 @@ class AuthService {
     return { ok: true };
   }
 
+  async requestPasswordReset(body: RequestPasswordResetBody) {
+    const email = body?.email?.trim().toLowerCase();
+
+    if (!email) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "PASSWORD_RESET_EMAIL_REQUIRED",
+        message: "Email is required.",
+      });
+    }
+
+    const genericResponse = {
+      ok: true,
+      message:
+        "If an account exists for that email, a password reset link has been sent.",
+    };
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true, email: true, username: true },
+    });
+
+    if (!user) {
+      return genericResponse;
+    }
+
+    const now = new Date();
+
+    await prisma.passwordResetToken.updateMany({
+      where: {
+        userId: user.id,
+        usedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: {
+        usedAt: now,
+      },
+    });
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = this.hashResetToken(token);
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 30);
+
+    await prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+      },
+    });
+
+    const appBaseUrl = process.env.APP_BASE_URL || "http://localhost:53002";
+
+    return {
+      ...genericResponse,
+      ...(process.env.NODE_ENV !== "production"
+        ? {
+            devResetToken: token,
+            devResetUrl: `${appBaseUrl}/reset-password?token=${token}`,
+            expiresAtUtc: expiresAt.toISOString(),
+          }
+        : {}),
+    };
+  }
+
+  async resetPassword(body: ResetPasswordBody) {
+    const token = body?.token?.trim();
+    const newPassword = body?.newPassword;
+
+    if (!token || !newPassword) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "PASSWORD_RESET_INVALID_INPUT",
+        message: "Token and new password are required.",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "PASSWORD_TOO_SHORT",
+        message: "Password must be at least 8 characters long.",
+      });
+    }
+
+    const tokenHash = this.hashResetToken(token);
+
+    const resetRecord = await prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+      include: { user: true },
+    });
+
+    if (!resetRecord || resetRecord.usedAt || resetRecord.expiresAt.getTime() <= Date.now()) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "INVALID_RESET_TOKEN",
+        message: "This password reset link is invalid or has expired.",
+      });
+    }
+
+    const passwordHash = await argon2.hash(newPassword);
+    const now = new Date();
+
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: resetRecord.userId },
+        data: { passwordHash },
+      }),
+      prisma.passwordResetToken.update({
+        where: { id: resetRecord.id },
+        data: { usedAt: now },
+      }),
+      prisma.session.updateMany({
+        where: {
+          userId: resetRecord.userId,
+          revokedAt: null,
+        },
+        data: {
+          revokedAt: now,
+        },
+      }),
+    ]);
+
+    return {
+      ok: true,
+      message: "Password reset successfully. Please sign in with your new password.",
+    };
+  }
+
+  async sendOtp(userId: string, body: SendOtpBody) {
+    const channel = body?.channel || "EMAIL";
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        emailVerifiedAt: true,
+        phoneVerifiedAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new ApiError({
+        statusCode: 404,
+        code: "USER_NOT_FOUND",
+        message: "User not found.",
+      });
+    }
+
+    const destination =
+      channel === "EMAIL" ? user.email : user.phone;
+
+    if (!destination) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "OTP_DESTINATION_MISSING",
+        message:
+          channel === "EMAIL"
+            ? "No email is available for this account."
+            : "No phone number is available for this account.",
+      });
+    }
+
+    const now = new Date();
+
+    await prisma.verificationCode.updateMany({
+      where: {
+        userId,
+        channel,
+        purpose: "CONTACT_VERIFICATION",
+        consumedAt: null,
+        expiresAt: { gt: now },
+      },
+      data: {
+        consumedAt: now,
+      },
+    });
+
+    const code = this.generateOtpCode();
+    const codeHash = this.hashVerificationCode(code);
+    const expiresAt = new Date(Date.now() + 1000 * 60 * 10);
+
+    await prisma.verificationCode.create({
+      data: {
+        userId,
+        channel,
+        purpose: "CONTACT_VERIFICATION",
+        destination,
+        codeHash,
+        expiresAt,
+      },
+    });
+
+    return {
+      ok: true,
+      message:
+        channel === "EMAIL"
+          ? "A verification code has been sent to your email."
+          : "A verification code has been sent to your phone.",
+      channel,
+      destinationMasked: this.maskDestination(destination, channel),
+      expiresAtUtc: expiresAt.toISOString(),
+      ...(process.env.NODE_ENV !== "production" ? { devOtpCode: code } : {}),
+    };
+  }
+
+  async verifyOtp(userId: string, body: VerifyOtpBody) {
+    const channel = body?.channel || "EMAIL";
+    const code = body?.code?.trim();
+
+    if (!code) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "OTP_CODE_REQUIRED",
+        message: "Verification code is required.",
+      });
+    }
+
+    const record = await prisma.verificationCode.findFirst({
+      where: {
+        userId,
+        channel,
+        purpose: "CONTACT_VERIFICATION",
+        consumedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!record) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "OTP_INVALID",
+        message: "This verification code is invalid or has expired.",
+      });
+    }
+
+    const codeHash = this.hashVerificationCode(code);
+
+    if (codeHash !== record.codeHash) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "OTP_INVALID",
+        message: "This verification code is invalid or has expired.",
+      });
+    }
+
+    const now = new Date();
+
+    const [updatedUser] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data:
+          channel === "EMAIL"
+            ? { emailVerifiedAt: now }
+            : { phoneVerifiedAt: now },
+        select: {
+          emailVerifiedAt: true,
+          phoneVerifiedAt: true,
+        },
+      }),
+      prisma.verificationCode.update({
+        where: { id: record.id },
+        data: { consumedAt: now },
+      }),
+    ]);
+
+    return {
+      ok: true,
+      message:
+        channel === "EMAIL"
+          ? "Your email has been verified."
+          : "Your phone number has been verified.",
+      emailVerifiedAtUtc: updatedUser.emailVerifiedAt?.toISOString() ?? null,
+      phoneVerifiedAtUtc: updatedUser.phoneVerifiedAt?.toISOString() ?? null,
+    };
+  }
+
   async resolveAuthFromRequest(
     req: Request
   ): Promise<{ userId: string; sessionId: string } | null> {
@@ -247,6 +543,30 @@ class AuthService {
       return xff.split(",")[0].trim();
     }
     return req.socket.remoteAddress ?? null;
+  }
+
+  private hashResetToken(token: string): string {
+    return crypto.createHash("sha256").update(token).digest("hex");
+  }
+
+  private hashVerificationCode(code: string): string {
+    return crypto.createHash("sha256").update(code).digest("hex");
+  }
+
+  private generateOtpCode(): string {
+    return String(Math.floor(100000 + Math.random() * 900000));
+  }
+
+  private maskDestination(destination: string, channel: "EMAIL" | "SMS"): string {
+    if (channel === "EMAIL") {
+      const [local, domain] = destination.split("@");
+      if (!local || !domain) return destination;
+      return `${local.slice(0, 2)}***@${domain}`;
+    }
+
+    return destination.length > 4
+      ? `***${destination.slice(-4)}`
+      : destination;
   }
 }
 

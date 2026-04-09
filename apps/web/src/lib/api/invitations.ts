@@ -1,9 +1,9 @@
+import { apiFetch } from "./client";
 import type {
   AcceptInvitationRequest,
   AcceptInvitationResponse,
   GetInvitationByTokenResponse,
 } from "@dcapx/contracts";
-import { apiFetch } from "./client";
 
 export function getInvitationByToken(token: string) {
   return apiFetch<GetInvitationByTokenResponse>(`/api/invitations/${token}`);

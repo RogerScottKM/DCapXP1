@@ -1,5 +1,9 @@
 import { Router } from "express";
+
 import {
+  activateTotp,
+  challengeTotp,
+  enrollTotp,
   getSession,
   login,
   logout,
@@ -18,16 +22,19 @@ const registerLimiter = simpleRateLimit({ keyPrefix: "auth:register", windowMs: 
 const loginLimiter = simpleRateLimit({ keyPrefix: "auth:login", windowMs: 10 * 60 * 1000, max: 20 });
 const passwordLimiter = simpleRateLimit({ keyPrefix: "auth:password", windowMs: 10 * 60 * 1000, max: 10 });
 const otpLimiter = simpleRateLimit({ keyPrefix: "auth:otp", windowMs: 10 * 60 * 1000, max: 10 });
+const mfaLimiter = simpleRateLimit({ keyPrefix: "auth:mfa", windowMs: 10 * 60 * 1000, max: 20 });
 
 router.post("/auth/register", registerLimiter, register);
 router.post("/auth/login", loginLimiter, login);
 router.get("/auth/session", getSession);
 router.post("/auth/logout", requireAuth, logout);
-
 router.post("/auth/request-password-reset", passwordLimiter, requestPasswordReset);
 router.post("/auth/reset-password", passwordLimiter, resetPassword);
-
 router.post("/auth/send-otp", requireAuth, otpLimiter, sendOtp);
 router.post("/auth/verify-otp", requireAuth, otpLimiter, verifyOtp);
+
+router.post("/auth/mfa/totp/enroll", requireAuth, mfaLimiter, enrollTotp);
+router.post("/auth/mfa/totp/activate", requireAuth, mfaLimiter, activateTotp);
+router.post("/auth/mfa/totp/challenge", requireAuth, mfaLimiter, challengeTotp);
 
 export default router;

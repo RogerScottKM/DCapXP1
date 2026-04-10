@@ -725,12 +725,15 @@ model Session {
   refreshTokenHash String
   ipAddress        String?
   userAgent        String?
+  mfaMethod        String?
+  mfaVerifiedAt    DateTime?
   expiresAt        DateTime
   revokedAt        DateTime?
   createdAt        DateTime  @default(now())
   user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
+  @@index([userId, mfaVerifiedAt])
 }
 
 model OtpChallenge {

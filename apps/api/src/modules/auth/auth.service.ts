@@ -401,7 +401,12 @@ class AuthService {
     };
   }
 
-  async resolveAuthFromRequest(req: Request): Promise<{ userId: string; sessionId: string } | null> {
+  async resolveAuthFromRequest(req: Request): Promise<{
+    userId: string;
+    sessionId: string;
+    mfaMethod: string | null;
+    mfaVerifiedAt: Date | null;
+  } | null> {
     const rawCookie = getCookieFromRequest(req, SESSION_COOKIE_NAME);
     const parsed = parseSessionCookieValue(rawCookie);
     if (!parsed) return null;
@@ -419,7 +424,12 @@ class AuthService {
     const secretOk = await verifySessionSecret(session.refreshTokenHash, parsed.secret);
     if (!secretOk) return null;
 
-    return { userId: session.userId, sessionId: session.id };
+    return {
+      userId: session.userId,
+      sessionId: session.id,
+      mfaMethod: session.mfaMethod ?? null,
+      mfaVerifiedAt: session.mfaVerifiedAt ?? null,
+    };
   }
 
   private getRequestIp(req: Request): string | null {

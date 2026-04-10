@@ -1,5 +1,7 @@
-import type { Request, Response, NextFunction } from "express";
+import type { NextFunction, Request, Response } from "express";
+
 import { authService, registerUser } from "./auth.service";
+import { mfaService } from "./mfa.service";
 
 export async function register(req: Request, res: Response, next: NextFunction) {
   try {
@@ -44,11 +46,7 @@ export async function logout(req: Request, res: Response, next: NextFunction) {
   }
 }
 
-export async function requestPasswordReset(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function requestPasswordReset(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await authService.requestPasswordReset(req.body);
     res.json(result);
@@ -57,11 +55,7 @@ export async function requestPasswordReset(
   }
 }
 
-export async function resetPassword(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function resetPassword(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await authService.resetPassword(req.body);
     res.json(result);
@@ -70,11 +64,7 @@ export async function resetPassword(
   }
 }
 
-export async function sendOtp(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function sendOtp(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await authService.sendOtp(req.auth!.userId, req.body);
     res.json(result);
@@ -83,11 +73,7 @@ export async function sendOtp(
   }
 }
 
-export async function verifyOtp(
-  req: Request,
-  res: Response,
-  next: NextFunction
-) {
+export async function verifyOtp(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await authService.verifyOtp(req.auth!.userId, req.body);
     res.json(result);
@@ -96,3 +82,29 @@ export async function verifyOtp(
   }
 }
 
+export async function enrollTotp(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await mfaService.beginTotpEnrollment(req.auth!.userId, req.body ?? {});
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function activateTotp(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await mfaService.activateTotpEnrollment(req.auth!.userId, req.body ?? {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function challengeTotp(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await mfaService.challengeTotp(req.auth!.userId, req.auth?.sessionId, req.body ?? {});
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}

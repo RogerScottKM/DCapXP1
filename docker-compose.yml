@@ -42,6 +42,8 @@ services:
       ADMIN_KEY: ${ADMIN_KEY:-}
       JWT_SECRET: ${JWT_SECRET:-}
       OTP_HMAC_SECRET: ${OTP_HMAC_SECRET:-}
+        MFA_TOTP_ISSUER: ${MFA_TOTP_ISSUER:-DCapX}
+        MFA_TOTP_ENCRYPTION_KEY: ${MFA_TOTP_ENCRYPTION_KEY:-}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:3000}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}

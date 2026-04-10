@@ -1,10 +1,14 @@
 import "dotenv/config";
 import type { Server } from "http";
-import app from "./app";
-import { prisma } from "./lib/prisma";
+import type { Express } from "express";
+import { bootstrapSecrets } from "./lib/bootstrap-secrets";
 
 const PORT = Number(process.env.API_PORT ?? process.env.PORT ?? 4010);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+let server: Server | null = null;
+let shuttingDown = false;
+let prismaClient: { $disconnect(): Promise<void> } | null = null;
 
 function requireEnv(name: string): void {
   if (!process.env[name]?.trim()) {
@@ -16,7 +20,6 @@ function validateEnv(): void {
   requireEnv("DATABASE_URL");
   requireEnv("JWT_SECRET");
   requireEnv("OTP_HMAC_SECRET");
-
   if (IS_PRODUCTION) {
     requireEnv("APP_BASE_URL");
     requireEnv("APP_CORS_ORIGINS");
@@ -24,14 +27,10 @@ function validateEnv(): void {
   }
 }
 
-let server: Server | null = null;
-let shuttingDown = false;
-
 async function shutdown(signal: string): Promise<void> {
   if (shuttingDown) {
     return;
   }
-
   shuttingDown = true;
   console.log(`[server] received ${signal}, shutting down`);
 
@@ -40,7 +39,6 @@ async function shutdown(signal: string): Promise<void> {
       resolve();
       return;
     }
-
     server.close(() => resolve());
   });
 
@@ -51,7 +49,9 @@ async function shutdown(signal: string): Promise<void> {
 
   try {
     await closeServer;
-    await prisma.$disconnect();
+    if (prismaClient) {
+      await prismaClient.$disconnect();
+    }
     clearTimeout(forceExitTimer);
     process.exit(0);
   } catch (error) {
@@ -62,7 +62,16 @@ async function shutdown(signal: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await bootstrapSecrets();
   validateEnv();
+
+  const appModule = await import("./app.js");
+  const prismaModule = await import("./lib/prisma.js");
+
+  const app = appModule.default as unknown as Express;
+  const prisma = prismaModule.prisma;
+
+  prismaClient = prisma;
 
   server = app.listen(PORT, () => {
     console.log(`api listening on ${PORT}`);
@@ -77,15 +86,12 @@ void main().catch((error) => {
 process.on("SIGTERM", () => {
   void shutdown("SIGTERM");
 });
-
 process.on("SIGINT", () => {
   void shutdown("SIGINT");
 });
-
 process.on("unhandledRejection", (error) => {
   console.error("unhandledRejection", error);
 });
-
 process.on("uncaughtException", (error) => {
   console.error("uncaughtException", error);
   void shutdown("uncaughtException");

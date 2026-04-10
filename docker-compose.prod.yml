@@ -6,17 +6,26 @@ services:
     container_name: dcapx-api
     command: ["bash", "-lc", "pnpm prisma generate && pnpm prisma migrate deploy && node dist/server.js"]
     environment:
-      NODE_ENV: "production"
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: "4010"
-      DATABASE_URL: ${DATABASE_URL?DATABASE_URL is required}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      ADMIN_KEY: ${ADMIN_KEY?ADMIN_KEY is required}
-      JWT_SECRET: ${JWT_SECRET?JWT_SECRET is required}
-      OTP_HMAC_SECRET: ${OTP_HMAC_SECRET?OTP_HMAC_SECRET is required}
-      APP_BASE_URL: ${APP_BASE_URL?APP_BASE_URL is required}
-      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS?APP_CORS_ORIGINS is required}
-      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-resend}
-      EMAIL_FROM: ${EMAIL_FROM?EMAIL_FROM is required}
+      ADMIN_KEY: ${ADMIN_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-}
+      OTP_HMAC_SECRET: ${OTP_HMAC_SECRET:-}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:3000}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
+      EMAIL_FROM: ${EMAIL_FROM:-DCapX <no-reply@dcapitalx.local>}
+      VAULT_ENABLED: ${VAULT_ENABLED:-false}
+      VAULT_ADDR: ${VAULT_ADDR:-}
+      VAULT_MOUNT_PATH: ${VAULT_MOUNT_PATH:-approle}
+      VAULT_ROLE_ID: ${VAULT_ROLE_ID:-}
+      VAULT_SECRET_ID: ${VAULT_SECRET_ID:-}
+      VAULT_SECRET_ID_FILE: ${VAULT_SECRET_ID_FILE:-}
+      VAULT_SECRET_PATH: ${VAULT_SECRET_PATH:-secret/data/dcapx/api}
+      VAULT_OVERRIDE_ENV: ${VAULT_OVERRIDE_ENV:-false}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       TRUST_PROXY: ${TRUST_PROXY:-1}
     depends_on:
@@ -49,7 +58,7 @@ services:
     container_name: dcapx-web
     environment:
       API_INTERNAL_URL: "http://api:4010"
-      NODE_ENV: "production"
+      NODE_ENV: ${NODE_ENV:-production}
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
     depends_on:

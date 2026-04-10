@@ -1,22 +1,24 @@
 import crypto from "crypto";
-import express from "express";
 import cors from "cors";
-import kycRoutes from "./modules/kyc/kyc.routes";
-import authRoutes from "./modules/auth/auth.routes";
-import onboardingRoutes from "./modules/onboarding/onboarding.routes";
+import express from "express";
+import helmet from "helmet";
+
 import advisorRoutes from "./modules/advisor/advisor.routes";
-import invitationsRoutes from "./modules/invitations/invitations.routes";
-import uploadsRoutes from "./modules/uploads/uploads.routes";
+import authRoutes from "./modules/auth/auth.routes";
 import consentsRoutes from "./modules/consents/consents.routes";
+import invitationsRoutes from "./modules/invitations/invitations.routes";
+import kycRoutes from "./modules/kyc/kyc.routes";
+import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import referralsRoutes from "./modules/referrals/referrals.routes";
-import marketRoutes from "./routes/market";
-import tradeRoutes from "./routes/trade";
-import streamRoutes from "./routes/stream";
+import uploadsRoutes from "./modules/uploads/uploads.routes";
 import verificationRoutes from "./modules/verification/verification.routes";
+import marketRoutes from "./routes/market";
+import streamRoutes from "./routes/stream";
+import tradeRoutes from "./routes/trade";
 
 const app = express();
 
-const corsOrigins = (process.env.APP_CORS_ORIGINS ?? "http://localhost:3002,http://localhost:53002")
+const corsOrigins = (process.env.APP_CORS_ORIGINS ?? "http://localhost:3000")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
@@ -33,8 +35,9 @@ const apiRouters = [
   referralsRoutes,
 ];
 
-app.set("trust proxy", process.env.TRUST_PROXY === "1");
-
+const trustProxy = process.env.TRUST_PROXY;
+app.set("trust proxy", trustProxy === "1" || trustProxy === "true");
+app.disable("x-powered-by");
 app.set("json replacer", (_key: string, value: unknown) => {
   return typeof value === "bigint" ? value.toString() : value;
 });
@@ -46,19 +49,28 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+
 app.use((_, res, next) => {
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=() ");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   next();
 });
 
 app.use(
   cors({
-    origin: corsOrigins,
+    origin(origin, callback) {
+      if (!origin || corsOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error("Origin not allowed by CORS"));
+    },
     credentials: true,
-  })
+  }),
 );
 
 app.use(express.json({ limit: "100kb" }));
@@ -72,18 +84,34 @@ app.get("/ready", (_req, res) => {
   res.json({ ok: true });
 });
 
-for (const router of apiRouters) {
-  app.use("/api", router);
-  app.use("/backend-api", router);
+for (const prefix of ["/api", "/backend-api"]) {
+  for (const router of apiRouters) {
+    app.use(prefix, router);
+  }
 }
 
-app.use(marketRoutes);
-app.use(tradeRoutes);
-app.use(streamRoutes);
-app.use("/v1/market", marketRoutes);
-app.use("/api/v1/market", marketRoutes);
-app.use("/v1/stream", streamRoutes);
-app.use("/api/v1/stream", streamRoutes);
+for (const prefix of ["", "/v1/market", "/api/v1/market"]) {
+  app.use(prefix, marketRoutes);
+}
+
+for (const prefix of ["", "/v1/trade", "/api/v1/trade"]) {
+  app.use(prefix, tradeRoutes);
+}
+
+for (const prefix of ["", "/v1/stream", "/api/v1/stream"]) {
+  app.use(prefix, streamRoutes);
+}
+
+app.use((req, res) => {
+  const requestId = (req as any).requestId;
+  res.status(404).json({
+    error: {
+      code: "NOT_FOUND",
+      message: "Route not found.",
+    },
+    requestId,
+  });
+});
 
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const status = err.statusCode || 500;

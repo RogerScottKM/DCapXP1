@@ -19,7 +19,12 @@ export async function requireUser(req: AuthedRequest, _res: Response, next: Next
       });
     }
 
-    req.auth = auth;
+    req.auth = {
+      userId: auth.userId,
+      sessionId: auth.sessionId,
+      roleCodes: "roleCodes" in auth && Array.isArray((auth as any).roleCodes) ? (auth as any).roleCodes : [],
+      mfaSatisfied: "mfaSatisfied" in auth ? Boolean((auth as any).mfaSatisfied) : false,
+    };
     req.user = { id: auth.userId, username: auth.userId };
     next();
   } catch (error) {

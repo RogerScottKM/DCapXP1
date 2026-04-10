@@ -2,16 +2,16 @@ services:
   pg:
     image: postgres:16
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-dcapx}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dcapx_local_only_change_me}
-      POSTGRES_DB: ${POSTGRES_DB:-dcapx}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - dcapx_pg:/var/lib/postgresql/data
     networks:
       - data
       - devhost
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dcapx} -d ${POSTGRES_DB:-dcapx}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -35,15 +35,15 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     environment:
-      NODE_ENV: ${NODE_ENV:-development}
+      NODE_ENV: ${NODE_ENV}
       API_PORT: "4010"
-      DATABASE_URL: ${DATABASE_URL:-postgresql://dcapx:dcapx_local_only_change_me@pg:5432/dcapx?schema=public}
+      DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      ADMIN_KEY: ${ADMIN_KEY:-local-dev-admin-key-change-me}
-      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret-change-me}
-      OTP_HMAC_SECRET: ${OTP_HMAC_SECRET:-local-dev-otp-secret-change-me}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3002}
-      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:3002,http://localhost:53002}
+      ADMIN_KEY: ${ADMIN_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      OTP_HMAC_SECRET: ${OTP_HMAC_SECRET}
+      APP_BASE_URL: ${APP_BASE_URL}
+      APP_CORS_ORIGINS: ${APP_CORS_ORIGINS}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
       EMAIL_FROM: ${EMAIL_FROM:-DCapX <no-reply@dcapitalx.local>}
     depends_on:
@@ -74,7 +74,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
     environment:
-      NODE_ENV: "production"
+      NODE_ENV: ${NODE_ENV}
       HOSTNAME: "0.0.0.0"
       API_INTERNAL_URL: "http://api:4010"
     depends_on:

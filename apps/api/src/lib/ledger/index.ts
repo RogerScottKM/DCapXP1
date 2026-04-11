@@ -9,3 +9,10 @@ export * from "./reconciliation";
 export * from "./execution";
 
 export * from "./order-state";
+export {
+  computeBuyHeldQuoteRelease,
+  computeExecutedQuote,
+  computeReservedQuote,
+  computeRemainingQtyFromCumulative,
+  assertCumulativeFillWithinOrder,
+} from "./hold-release";

@@ -8,6 +8,8 @@ import {
   executeLimitOrderAgainstBook,
   getOrderRemainingQty,
   reconcileOrderExecution,
+  releaseResidualHoldAfterExecution,
+  reconcileCumulativeFills,
   syncOrderStatusFromTrades,
   reconcileTradeSettlement,
   releaseOrderOnCancel,
@@ -95,8 +97,9 @@ router.post("/orders", enforceMandate("TRADE"), async (req: any, res) => {
       );
 
       const orderReconciliation = await reconcileOrderExecution(order.id, tx);
+      const cumulativeFillCheck = await reconcileCumulativeFills(order.id, tx);
 
-      return { order, ledgerReservation, execution, orderReconciliation };
+      return { order, ledgerReservation, execution, orderReconciliation, cumulativeFillCheck };
     });
 
     await bumpOrdersPlaced(principal.mandateId ?? principal.mandate?.id);
@@ -217,6 +220,29 @@ router.post("/fills/demo", enforceMandate("TRADE"), async (req: any, res) => {
       const updatedBuyOrder = await syncOrderStatusFromTrades(buyOrder.id, tx);
       const updatedSellOrder = await syncOrderStatusFromTrades(sellOrder.id, tx);
 
+      const buyFillCheck = await reconcileCumulativeFills(updatedBuyOrder.id, tx);
+      const sellFillCheck = await reconcileCumulativeFills(updatedSellOrder.id, tx);
+
+      const buyHeldRelease =
+        updatedBuyOrder.status === "FILLED"
+          ? await releaseResidualHoldAfterExecution(
+              {
+                orderId: updatedBuyOrder.id,
+                userId: updatedBuyOrder.userId,
+                symbol: updatedBuyOrder.symbol,
+                side: updatedBuyOrder.side,
+                mode: updatedBuyOrder.mode,
+                orderQty: updatedBuyOrder.qty,
+                limitPrice: updatedBuyOrder.price,
+                cumulativeFilledQty: buyFillCheck.cumulativeFilledQty,
+                weightedExecutedQuote: new Prisma.Decimal(payload.qty).mul(
+                  new Prisma.Decimal(payload.price),
+                ),
+              },
+              tx,
+            )
+          : null;
+
       const reconciliation = await reconcileTradeSettlement(trade.id, tx);
       const buyOrderReconciliation = await reconcileOrderExecution(updatedBuyOrder.id, tx);
       const sellOrderReconciliation = await reconcileOrderExecution(updatedSellOrder.id, tx);
@@ -229,6 +255,9 @@ router.post("/fills/demo", enforceMandate("TRADE"), async (req: any, res) => {
         sellOrder: updatedSellOrder,
         buyOrderReconciliation,
         sellOrderReconciliation,
+        buyFillCheck,
+        sellFillCheck,
+        buyHeldRelease,
       };
     });
 

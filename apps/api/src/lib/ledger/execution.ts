@@ -13,6 +13,7 @@ import { settleMatchedTrade } from "./order-lifecycle";
 import { assertExecutedQtyWithinOrder, computeRemainingQty, deriveOrderStatus } from "./order-state";
 import { reconcileTradeSettlement } from "./reconciliation";
 import { postLedgerTransaction } from "./service";
+import { computeBuyHeldQuoteRelease, assertCumulativeFillWithinOrder } from "./hold-release";
 
 type LedgerDbClient = PrismaClient | Prisma.TransactionClient;
 type Decimalish = string | number | Decimal | Prisma.Decimal;
@@ -344,5 +345,118 @@ export async function reconcileOrderExecution(orderId: string | bigint, db: Ledg
     ledgerTransactionCount: ledgerTransactions.length,
     executedQty: executedQty.toString(),
     remainingQty: safeRemaining.toString(),
+  };
+}
+
+
+
+function toDecimalExecution(value: string | number | Decimal): Decimal {
+  return value instanceof Decimal ? value : new Decimal(value);
+}
+
+export async function releaseResidualHoldAfterExecution(params: {
+  orderId: bigint;
+  userId: string;
+  symbol: string;
+  side: "BUY" | "SELL";
+  mode: TradeMode;
+  orderQty: string | number | Decimal;
+  limitPrice: string | number | Decimal;
+  cumulativeFilledQty: string | number | Decimal;
+  weightedExecutedQuote?: string | number | Decimal;
+}, db: LedgerDbClient = prisma) {
+  if (params.side !== "BUY") {
+    return null;
+  }
+
+  const releaseAmount = computeBuyHeldQuoteRelease({
+    orderQty: params.orderQty,
+    limitPrice: params.limitPrice,
+    cumulativeFilledQty: params.cumulativeFilledQty,
+    weightedExecutedQuote: params.weightedExecutedQuote ?? "0",
+  });
+
+  if (releaseAmount.lessThanOrEqualTo(0)) {
+    return null;
+  }
+
+  const referenceType = "ORDER_RELEASE";
+  const referenceId = `${params.orderId}:FINAL_RESIDUAL_RELEASE`;
+
+  const existing = await findExistingReference(referenceType, referenceId, db);
+  if (existing) {
+    return existing;
+  }
+
+  const quoteAsset = params.symbol.split("-")[1] ?? "USD";
+  const userQuoteAccounts = await ensureUserLedgerAccounts(
+    {
+      userId: params.userId,
+      assetCode: quoteAsset,
+      mode: params.mode,
+    },
+    db,
+  );
+
+  return postLedgerTransaction(
+    {
+      referenceType,
+      referenceId,
+      description: "Release unused held quote after final buy execution",
+      metadata: {
+        orderId: params.orderId.toString(),
+        symbol: params.symbol,
+        side: params.side,
+        reason: "FINAL_RESIDUAL_RELEASE",
+        cumulativeFilledQty: String(params.cumulativeFilledQty),
+      },
+      postings: [
+        {
+          accountId: userQuoteAccounts.held.id,
+          assetCode: userQuoteAccounts.held.assetCode,
+          side: "DEBIT",
+          amount: releaseAmount,
+        },
+        {
+          accountId: userQuoteAccounts.available.id,
+          assetCode: userQuoteAccounts.available.assetCode,
+          side: "CREDIT",
+          amount: releaseAmount,
+        },
+      ],
+    },
+    db,
+  );
+}
+
+export async function reconcileCumulativeFills(
+  orderId: bigint,
+  db: LedgerDbClient = prisma,
+) {
+  const order = await db.order.findUnique({ where: { id: orderId } });
+  if (!order) {
+    throw new Error("Order not found for cumulative fill reconciliation.");
+  }
+
+  const aggregate = await db.trade.aggregate({
+    _sum: { qty: true },
+    where: {
+      OR: [{ buyOrderId: orderId }, { sellOrderId: orderId }],
+    },
+  });
+
+  const cumulativeFilledQty = aggregate._sum.qty ?? new Decimal(0);
+  assertCumulativeFillWithinOrder(order.qty, cumulativeFilledQty);
+
+  const rawRemaining = toDecimalExecution(order.qty).sub(
+    toDecimalExecution(cumulativeFilledQty),
+  );
+  const remainingQty = rawRemaining.lessThan(0) ? new Decimal(0) : rawRemaining;
+
+  return {
+    orderId: order.id.toString(),
+    orderQty: toDecimalExecution(order.qty).toString(),
+    cumulativeFilledQty: toDecimalExecution(cumulativeFilledQty).toString(),
+    remainingQty: remainingQty.toString(),
   };
 }

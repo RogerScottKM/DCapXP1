@@ -12,6 +12,10 @@ import onboardingRoutes from "./modules/onboarding/onboarding.routes";
 import referralsRoutes from "./modules/referrals/referrals.routes";
 import uploadsRoutes from "./modules/uploads/uploads.routes";
 import verificationRoutes from "./modules/verification/verification.routes";
+import adminRoutes from "./routes/admin";
+import agenticRoutes from "./routes/agentic";
+import agentsRoutes from "./routes/agents";
+import mandatesRoutes from "./routes/mandates";
 import marketRoutes from "./routes/market";
 import streamRoutes from "./routes/stream";
 import tradeRoutes from "./routes/trade";
@@ -88,6 +92,22 @@ for (const prefix of ["/api", "/backend-api"]) {
   for (const router of apiRouters) {
     app.use(prefix, router);
   }
+}
+
+for (const prefix of ["/api/admin", "/admin"]) {
+  app.use(prefix, adminRoutes);
+}
+
+for (const prefix of ["/api/v1/agents", "/v1/agents"]) {
+  app.use(prefix, agentsRoutes);
+}
+
+for (const prefix of ["/api/v1/mandates", "/v1/mandates"]) {
+  app.use(prefix, mandatesRoutes);
+}
+
+for (const prefix of ["/api/v1/ui", "/v1/ui"]) {
+  app.use(prefix, agenticRoutes);
 }
 
 for (const prefix of ["", "/v1/market", "/api/v1/market"]) {

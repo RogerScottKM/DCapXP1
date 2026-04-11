@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Response } from "express";
 import crypto from "crypto";
 import { z } from "zod";
 import { AgentKind } from "@prisma/client";
@@ -14,7 +15,7 @@ const createAgentSchema = z.object({
 });
 
 // Create a new agent + issue an Ed25519 keypair (private key returned ONCE)
-router.post("/", requireUser, requireMfa, async (req: AuthedRequest, res) => {
+router.post("/", requireUser, requireMfa, async (req: AuthedRequest, res: Response) => {
   const body = createAgentSchema.parse(req.body);
 
   const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
@@ -50,7 +51,7 @@ router.post("/", requireUser, requireMfa, async (req: AuthedRequest, res) => {
 });
 
 // List your agents
-router.get("/", requireUser, async (req: AuthedRequest, res) => {
+router.get("/", requireUser, async (req: AuthedRequest, res: Response) => {
   const agents = await prisma.agent.findMany({
     where: { userId: req.user!.id },
     include: { mandates: true, keys: { where: { revokedAt: null } } },
@@ -61,7 +62,7 @@ router.get("/", requireUser, async (req: AuthedRequest, res) => {
 });
 
 // Rotate keys (revoke old + issue new private key ONCE)
-router.post("/:agentId/keys/rotate", requireUser, requireMfa, async (req: AuthedRequest, res) => {
+router.post("/:agentId/keys/rotate", requireUser, requireMfa, async (req: AuthedRequest, res: Response) => {
   const agentId = String(req.params.agentId);
 
   const agent = await prisma.agent.findFirst({
@@ -94,7 +95,7 @@ router.post("/:agentId/keys/rotate", requireUser, requireMfa, async (req: Authed
 });
 
 // Revoke agent (and all keys/mandates)
-router.post("/:agentId/revoke", requireUser, requireMfa, async (req: AuthedRequest, res) => {
+router.post("/:agentId/revoke", requireUser, requireMfa, async (req: AuthedRequest, res: Response) => {
   const agentId = String(req.params.agentId);
 
   const agent = await prisma.agent.findFirst({ where: { id: agentId, userId: req.user!.id } });

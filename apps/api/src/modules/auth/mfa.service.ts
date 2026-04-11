@@ -23,6 +23,14 @@ type ChallengeInput = {
   token?: string;
 };
 
+type RecoveryCodesInput = {
+  count?: number;
+};
+
+type RecoveryCodeChallengeInput = {
+  code?: string;
+};
+
 class MfaService {
   async beginTotpEnrollment(userId: string, input: BeginEnrollmentInput) {
     const user = await prisma.user.findUnique({
@@ -57,19 +65,13 @@ class MfaService {
     }
 
     await prisma.mfaFactor.updateMany({
-      where: {
-        userId,
-        type: "TOTP",
-        status: "PENDING",
-      },
-      data: {
-        status: "REVOKED",
-        revokedAt: new Date(),
-      },
+      where: { userId, type: "TOTP", status: "PENDING" },
+      data: { status: "REVOKED", revokedAt: new Date() },
     });
 
     const secret = authenticator.generateSecret();
     const secretEncrypted = this.encryptSecret(secret);
+
     const factor = await prisma.mfaFactor.create({
       data: {
         userId,
@@ -107,12 +109,7 @@ class MfaService {
     }
 
     const factor = await prisma.mfaFactor.findFirst({
-      where: {
-        id: factorId,
-        userId,
-        type: "TOTP",
-        status: "PENDING",
-      },
+      where: { id: factorId, userId, type: "TOTP", status: "PENDING" },
     });
 
     if (!factor) {
@@ -125,6 +122,7 @@ class MfaService {
 
     const secret = this.decryptSecret(factor.secretEncrypted);
     const valid = authenticator.check(token, secret);
+
     if (!valid) {
       throw new ApiError({
         statusCode: 400,
@@ -134,6 +132,7 @@ class MfaService {
     }
 
     const now = new Date();
+
     await prisma.$transaction([
       prisma.mfaFactor.updateMany({
         where: {
@@ -142,18 +141,11 @@ class MfaService {
           status: "ACTIVE",
           id: { not: factor.id },
         },
-        data: {
-          status: "REVOKED",
-          revokedAt: now,
-        },
+        data: { status: "REVOKED", revokedAt: now },
       }),
       prisma.mfaFactor.update({
         where: { id: factor.id },
-        data: {
-          status: "ACTIVE",
-          activatedAt: now,
-          revokedAt: null,
-        },
+        data: { status: "ACTIVE", activatedAt: now, revokedAt: null },
       }),
     ]);
 
@@ -167,6 +159,7 @@ class MfaService {
 
   async challengeTotp(userId: string, sessionId: string | undefined, input: ChallengeInput) {
     const token = input.token?.trim();
+
     if (!token) {
       throw new ApiError({
         statusCode: 400,
@@ -203,6 +196,7 @@ class MfaService {
 
     const secret = this.decryptSecret(factor.secretEncrypted);
     const valid = authenticator.check(token, secret);
+
     if (!valid) {
       throw new ApiError({
         statusCode: 400,
@@ -212,6 +206,7 @@ class MfaService {
     }
 
     const now = new Date();
+
     await prisma.session.update({
       where: { id: sessionId },
       data: {
@@ -227,12 +222,128 @@ class MfaService {
     };
   }
 
+  async regenerateRecoveryCodes(userId: string, input: RecoveryCodesInput = {}) {
+    const activeFactor = await prisma.mfaFactor.findFirst({
+      where: {
+        userId,
+        type: "TOTP",
+        status: "ACTIVE",
+        revokedAt: null,
+      },
+      orderBy: { activatedAt: "desc" },
+      select: { id: true },
+    });
+
+    if (!activeFactor) {
+      throw new ApiError({
+        statusCode: 409,
+        code: "MFA_RECOVERY_CODES_REQUIRES_TOTP",
+        message: "Activate TOTP before generating recovery codes.",
+      });
+    }
+
+    const requestedCount = Number(input.count ?? 10);
+    const count = Number.isFinite(requestedCount)
+      ? Math.max(8, Math.min(12, Math.trunc(requestedCount)))
+      : 10;
+
+    const recoveryCodes = Array.from({ length: count }, () => this.generateRecoveryCode());
+    const now = new Date();
+
+    await prisma.$transaction([
+      prisma.mfaRecoveryCode.deleteMany({
+        where: { userId },
+      }),
+      prisma.mfaRecoveryCode.createMany({
+        data: recoveryCodes.map((code) => ({
+          userId,
+          codeHash: this.hashRecoveryCode(code),
+          consumedAt: null,
+          createdAt: now,
+        })),
+      }),
+    ]);
+
+    return {
+      ok: true,
+      codes: recoveryCodes,
+      count,
+      generatedAtUtc: now.toISOString(),
+      method: "RECOVERY_CODE",
+    };
+  }
+
+  async challengeRecoveryCode(
+    userId: string,
+    sessionId: string | undefined,
+    input: RecoveryCodeChallengeInput,
+  ) {
+    const code = input.code?.trim();
+
+    if (!code) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "MFA_RECOVERY_CODE_REQUIRED",
+        message: "A recovery code is required.",
+      });
+    }
+
+    if (!sessionId) {
+      throw new ApiError({
+        statusCode: 401,
+        code: "UNAUTHENTICATED",
+        message: "Authentication required.",
+      });
+    }
+
+    const codeHash = this.hashRecoveryCode(code);
+    const record = await prisma.mfaRecoveryCode.findFirst({
+      where: {
+        userId,
+        codeHash,
+        consumedAt: null,
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (!record) {
+      throw new ApiError({
+        statusCode: 400,
+        code: "MFA_RECOVERY_CODE_INVALID",
+        message: "The provided recovery code is invalid.",
+      });
+    }
+
+    const now = new Date();
+
+    await prisma.$transaction([
+      prisma.mfaRecoveryCode.update({
+        where: { id: record.id },
+        data: { consumedAt: now },
+      }),
+      prisma.session.update({
+        where: { id: sessionId },
+        data: {
+          mfaMethod: "RECOVERY_CODE",
+          mfaVerifiedAt: now,
+        },
+      }),
+    ]);
+
+    return {
+      ok: true,
+      method: "RECOVERY_CODE",
+      mfaVerifiedAtUtc: now.toISOString(),
+    };
+  }
+
   private encryptSecret(secret: string): string {
     const key = this.deriveKey();
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
     const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
     const tag = cipher.getAuthTag();
+
     return [iv.toString("base64"), tag.toString("base64"), encrypted.toString("base64")].join(".");
   }
 
@@ -268,6 +379,22 @@ class MfaService {
     }
 
     return crypto.createHash("sha256").update(raw).digest();
+  }
+
+  private generateRecoveryCode(): string {
+    const raw = crypto
+      .randomBytes(8)
+      .toString("base64url")
+      .replace(/[^A-Za-z0-9]/g, "")
+      .toUpperCase()
+      .slice(0, 12);
+
+    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+  }
+
+  private hashRecoveryCode(code: string): string {
+    const normalized = code.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    return crypto.createHash("sha256").update(normalized).digest("hex");
   }
 }
 

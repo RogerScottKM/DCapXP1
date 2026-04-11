@@ -66,6 +66,63 @@ async function ensureAuthContext(req: Request, res: Response): Promise<AuthConte
   return req.auth;
 }
 
+function getMfaAgeMs(auth: AuthContext): number {
+  const verifiedAt = auth.mfaVerifiedAt ? new Date(auth.mfaVerifiedAt).getTime() : 0;
+  return verifiedAt ? Date.now() - verifiedAt : Number.POSITIVE_INFINITY;
+}
+
+function isRecentMfa(auth: AuthContext, maxAgeSeconds: number): boolean {
+  const ageMs = getMfaAgeMs(auth);
+  return Number.isFinite(ageMs) && ageMs <= maxAgeSeconds * 1000;
+}
+
+function getRequestedMode(req: Request): string | undefined {
+  const bodyMode = typeof req.body?.mode === "string" ? req.body.mode : undefined;
+  const queryMode =
+    typeof req.query?.mode === "string"
+      ? req.query.mode
+      : Array.isArray(req.query?.mode)
+        ? req.query.mode[0]
+        : undefined;
+  const headerMode = typeof req.headers["x-mode"] === "string" ? req.headers["x-mode"] : undefined;
+
+  const mode = bodyMode ?? queryMode ?? headerMode;
+  return mode ? String(mode).trim().toUpperCase() : undefined;
+}
+
+async function hasApprovedLiveEligibility(userId: string): Promise<boolean> {
+  const approvedKycCase = await prisma.kycCase.findFirst({
+    where: {
+      userId,
+      status: "APPROVED" as any,
+    },
+    select: { id: true },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  if (approvedKycCase) {
+    return true;
+  }
+
+  const legacyKycDelegate = (prisma as any).kyc;
+  if (legacyKycDelegate?.findFirst) {
+    const approvedLegacyKyc = await legacyKycDelegate.findFirst({
+      where: {
+        userId,
+        status: "APPROVED",
+      },
+      select: { id: true },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    if (approvedLegacyKyc) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function requireAuth(req: Request, _res: Response, next: NextFunction) {
   try {
     const auth = await buildAuthContext(req);
@@ -111,21 +168,101 @@ export function requireRecentMfa(maxAgeSeconds = 15 * 60) {
   return async function requireRecentMfaMiddleware(req: Request, res: Response, next: NextFunction) {
     try {
       const auth = await ensureAuthContext(req, res);
-      const verifiedAt = auth.mfaVerifiedAt ? new Date(auth.mfaVerifiedAt).getTime() : 0;
-      const ageMs = verifiedAt ? Date.now() - verifiedAt : Number.POSITIVE_INFINITY;
-      const isFresh = Number.isFinite(ageMs) && ageMs <= maxAgeSeconds * 1000;
+      const fresh = isRecentMfa(auth, maxAgeSeconds);
 
       req.auth = {
         ...auth,
-        mfaSatisfied: isFresh,
+        mfaSatisfied: fresh,
       };
 
-      if (!isFresh) {
+      if (!fresh) {
         throw new ApiError({
           statusCode: 401,
           code: "MFA_REQUIRED",
           message: "A recent MFA challenge is required for this action.",
           retryable: true,
+        });
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function requireAdminRecentMfa(
+  allowedRoleCodes: string[] = ["ADMIN", "AUDITOR"],
+  maxAgeSeconds = 15 * 60,
+) {
+  return async function requireAdminRecentMfaMiddleware(req: Request, res: Response, next: NextFunction) {
+    try {
+      const auth = await ensureAuthContext(req, res);
+      const allowed = new Set(allowedRoleCodes);
+      const hasRole = auth.roleCodes.some((roleCode) => allowed.has(roleCode));
+
+      if (!hasRole) {
+        throw new ApiError({
+          statusCode: 403,
+          code: "FORBIDDEN",
+          message: "Administrator or auditor access is required.",
+        });
+      }
+
+      const fresh = isRecentMfa(auth, maxAgeSeconds);
+
+      req.auth = {
+        ...auth,
+        mfaSatisfied: fresh,
+      };
+
+      if (!fresh) {
+        throw new ApiError({
+          statusCode: 401,
+          code: "MFA_REQUIRED",
+          message: "A recent MFA challenge is required for administrative access.",
+          retryable: true,
+        });
+      }
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function requireLiveModeEligible(maxAgeSeconds = 15 * 60) {
+  return async function requireLiveModeEligibleMiddleware(req: Request, res: Response, next: NextFunction) {
+    try {
+      const requestedMode = getRequestedMode(req);
+      if (requestedMode !== "LIVE") {
+        return next();
+      }
+
+      const auth = await ensureAuthContext(req, res);
+      const fresh = isRecentMfa(auth, maxAgeSeconds);
+
+      req.auth = {
+        ...auth,
+        mfaSatisfied: fresh,
+      };
+
+      if (!fresh) {
+        throw new ApiError({
+          statusCode: 401,
+          code: "MFA_REQUIRED",
+          message: "A recent MFA challenge is required for LIVE mode.",
+          retryable: true,
+        });
+      }
+
+      const liveEligible = await hasApprovedLiveEligibility(auth.userId);
+      if (!liveEligible) {
+        throw new ApiError({
+          statusCode: 403,
+          code: "LIVE_MODE_NOT_ALLOWED",
+          message: "Approved KYC is required for LIVE mode.",
         });
       }
 

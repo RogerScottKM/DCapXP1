@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Response } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { requireMfa, requireUser, AuthedRequest } from "../middleware/auth";
@@ -19,7 +20,7 @@ const issueMandateSchema = z.object({
 });
 
 // Issue mandate to an agent you own
-router.post("/agents/:agentId", requireUser, requireMfa, async (req: AuthedRequest, res) => {
+router.post("/agents/:agentId", requireUser, requireMfa, async (req: AuthedRequest, res: Response) => {
   const agentId = String(req.params.agentId);
   const body = issueMandateSchema.parse(req.body);
 
@@ -53,7 +54,7 @@ router.post("/agents/:agentId", requireUser, requireMfa, async (req: AuthedReque
 });
 
 // List mandates for an agent you own
-router.get("/agents/:agentId", requireUser, async (req: AuthedRequest, res) => {
+router.get("/agents/:agentId", requireUser, async (req: AuthedRequest, res: Response) => {
   const agentId = String(req.params.agentId);
 
   const agent = await prisma.agent.findFirst({
@@ -70,7 +71,7 @@ router.get("/agents/:agentId", requireUser, async (req: AuthedRequest, res) => {
 });
 
 // Revoke a mandate
-router.post("/:mandateId/revoke", requireUser, requireMfa, async (req: AuthedRequest, res) => {
+router.post("/:mandateId/revoke", requireUser, requireMfa, async (req: AuthedRequest, res: Response) => {
   const mandateId = String(req.params.mandateId);
 
   // ensure ownership via agent.userId

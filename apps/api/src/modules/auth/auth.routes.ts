@@ -2,18 +2,20 @@ import { Router } from "express";
 
 import {
   activateTotp,
+  challengeRecoveryCode,
   challengeTotp,
   enrollTotp,
   getSession,
   login,
   logout,
+  regenerateRecoveryCodes,
   register,
   requestPasswordReset,
   resetPassword,
   sendOtp,
   verifyOtp,
 } from "./auth.controller";
-import { requireAuth } from "../../middleware/require-auth";
+import { requireAuth, requireRecentMfa } from "../../middleware/require-auth";
 import { simpleRateLimit } from "../../middleware/simple-rate-limit";
 
 const router = Router();
@@ -36,5 +38,19 @@ router.post("/auth/verify-otp", requireAuth, otpLimiter, verifyOtp);
 router.post("/auth/mfa/totp/enroll", requireAuth, mfaLimiter, enrollTotp);
 router.post("/auth/mfa/totp/activate", requireAuth, mfaLimiter, activateTotp);
 router.post("/auth/mfa/totp/challenge", requireAuth, mfaLimiter, challengeTotp);
+
+router.post(
+  "/auth/mfa/recovery-codes/regenerate",
+  requireAuth,
+  requireRecentMfa(),
+  mfaLimiter,
+  regenerateRecoveryCodes,
+);
+router.post(
+  "/auth/mfa/recovery-codes/challenge",
+  requireAuth,
+  mfaLimiter,
+  challengeRecoveryCode,
+);
 
 export default router;

@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 
 import { ApiError } from "../lib/errors/api-error";
 import type { AuthContext } from "./require-auth";
-import { requireAuth, requireRecentMfa } from "./require-auth";
+import { requireAuth, requireRecentMfa, requireAdminRecentMfa } from "./require-auth";
 
 export type AuthedRequest = Request & {
   auth?: AuthContext;
@@ -29,7 +29,11 @@ export async function requireUser(req: AuthedRequest, res: Response, next: NextF
       });
     }
 
-    req.user = { id: req.auth.userId, username: req.auth.userId };
+    req.user = {
+      id: req.auth.userId,
+      username: req.auth.userId,
+    };
+
     next();
   } catch (error) {
     next(error);
@@ -37,13 +41,15 @@ export async function requireUser(req: AuthedRequest, res: Response, next: NextF
 }
 
 export const requireMfa = requireRecentMfa();
+export const requireAdminMfa = requireAdminRecentMfa();
 
 export function authFromJwt(_req: Request, _res: Response, next: NextFunction) {
   next(
     new ApiError({
       statusCode: 501,
       code: "LEGACY_AUTH_DISABLED",
-      message: "Legacy auth middleware is disabled. Use the canonical session-based require-auth middleware instead.",
+      message:
+        "Legacy auth middleware is disabled. Use the canonical session-based require-auth middleware instead.",
     }),
   );
 }

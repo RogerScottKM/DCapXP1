@@ -1326,3 +1326,13 @@ model NotificationDelivery {
 
   @@index([userId, channel, templateKey, status])
 }
+
+model MfaRecoveryCode {
+  id         String    @id @default(cuid())
+  userId     String
+  codeHash   String    @unique
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, consumedAt])
+}

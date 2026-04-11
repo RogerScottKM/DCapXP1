@@ -108,3 +108,25 @@ export async function challengeTotp(req: Request, res: Response, next: NextFunct
     next(error);
   }
 }
+
+export async function regenerateRecoveryCodes(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await mfaService.regenerateRecoveryCodes(req.auth!.userId, req.body ?? {});
+    res.status(201).json(result);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function challengeRecoveryCode(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await mfaService.challengeRecoveryCode(
+      req.auth!.userId,
+      req.auth?.sessionId,
+      req.body ?? {},
+    );
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}

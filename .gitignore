@@ -3,3 +3,16 @@
 .env
 .env.*
 !.env.example
+
+# ─── Secrets & private keys ──────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+secrets/
+!secrets/.gitkeep
+
+# ─── Docker compose backups (use git branches instead) ───
+docker-compose-backup*.yml
+docker-compose.yml.bak*

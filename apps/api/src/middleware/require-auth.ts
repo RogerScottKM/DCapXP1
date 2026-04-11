@@ -2,6 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 
 import { ApiError } from "../lib/errors/api-error";
 import { prisma } from "../lib/prisma";
+import { recordSecurityAudit } from "../lib/service/security-audit";
 import { authService } from "../modules/auth/auth.service";
 
 export type AuthContext = {
@@ -40,6 +41,27 @@ async function buildAuthContext(req: Request): Promise<AuthContext | null> {
     mfaMethod: auth.mfaMethod ?? null,
     mfaVerifiedAt: auth.mfaVerifiedAt ?? null,
   };
+}
+
+async function auditAuthDecision(
+  req: Request,
+  auth: AuthContext | null,
+  action: string,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  await recordSecurityAudit({
+    actorType: auth?.userId ? "USER" : "ANONYMOUS",
+    actorId: auth?.userId ?? null,
+    action,
+    resourceType: "ROUTE",
+    resourceId: req.originalUrl || req.path || null,
+    req,
+    metadata: {
+      method: req.method,
+      path: req.originalUrl || req.path,
+      ...metadata,
+    },
+  });
 }
 
 async function ensureAuthContext(req: Request, res: Response): Promise<AuthContext> {
@@ -127,6 +149,9 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
   try {
     const auth = await buildAuthContext(req);
     if (!auth) {
+      await auditAuthDecision(req, null, "AUTHZ_UNAUTHENTICATED_DENIED", {
+        reason: "AUTH_REQUIRED",
+      });
       throw new ApiError({
         statusCode: 401,
         code: "UNAUTHENTICATED",
@@ -150,6 +175,10 @@ export function requireRole(...allowedRoleCodes: string[]) {
       const hasRole = auth.roleCodes.some((roleCode) => allowed.has(roleCode));
 
       if (!hasRole) {
+        await auditAuthDecision(req, auth, "AUTHZ_ROLE_DENIED", {
+          allowedRoleCodes,
+          currentRoleCodes: auth.roleCodes,
+        });
         throw new ApiError({
           statusCode: 403,
           code: "FORBIDDEN",
@@ -176,6 +205,11 @@ export function requireRecentMfa(maxAgeSeconds = 15 * 60) {
       };
 
       if (!fresh) {
+        await auditAuthDecision(req, auth, "AUTHZ_MFA_REQUIRED_DENIED", {
+          maxAgeSeconds,
+          mfaMethod: auth.mfaMethod ?? null,
+          mfaVerifiedAt: auth.mfaVerifiedAt?.toISOString?.() ?? auth.mfaVerifiedAt ?? null,
+        });
         throw new ApiError({
           statusCode: 401,
           code: "MFA_REQUIRED",
@@ -202,6 +236,10 @@ export function requireAdminRecentMfa(
       const hasRole = auth.roleCodes.some((roleCode) => allowed.has(roleCode));
 
       if (!hasRole) {
+        await auditAuthDecision(req, auth, "AUTHZ_ADMIN_ROLE_DENIED", {
+          allowedRoleCodes,
+          currentRoleCodes: auth.roleCodes,
+        });
         throw new ApiError({
           statusCode: 403,
           code: "FORBIDDEN",
@@ -217,6 +255,11 @@ export function requireAdminRecentMfa(
       };
 
       if (!fresh) {
+        await auditAuthDecision(req, auth, "AUTHZ_ADMIN_MFA_REQUIRED_DENIED", {
+          maxAgeSeconds,
+          mfaMethod: auth.mfaMethod ?? null,
+          mfaVerifiedAt: auth.mfaVerifiedAt?.toISOString?.() ?? auth.mfaVerifiedAt ?? null,
+        });
         throw new ApiError({
           statusCode: 401,
           code: "MFA_REQUIRED",
@@ -249,6 +292,12 @@ export function requireLiveModeEligible(maxAgeSeconds = 15 * 60) {
       };
 
       if (!fresh) {
+        await auditAuthDecision(req, auth, "AUTHZ_LIVE_MFA_REQUIRED_DENIED", {
+          requestedMode,
+          maxAgeSeconds,
+          mfaMethod: auth.mfaMethod ?? null,
+          mfaVerifiedAt: auth.mfaVerifiedAt?.toISOString?.() ?? auth.mfaVerifiedAt ?? null,
+        });
         throw new ApiError({
           statusCode: 401,
           code: "MFA_REQUIRED",
@@ -259,6 +308,10 @@ export function requireLiveModeEligible(maxAgeSeconds = 15 * 60) {
 
       const liveEligible = await hasApprovedLiveEligibility(auth.userId);
       if (!liveEligible) {
+        await auditAuthDecision(req, auth, "LIVE_MODE_DENIED", {
+          requestedMode,
+          reason: "APPROVED_KYC_REQUIRED",
+        });
         throw new ApiError({
           statusCode: 403,
           code: "LIVE_MODE_NOT_ALLOWED",

@@ -1,13 +1,13 @@
 import argon2 from "argon2";
 import crypto from "crypto";
 import type { Request, Response } from "express";
-import { prisma } from "../../lib/prisma";
-import { withTx } from "../../lib/service/tx";
-import { writeAuditEvent } from "../../lib/service/audit";
-import { parseDto } from "../../lib/service/zod";
-import { registerDto } from "./auth.dto";
-import { mapRegisterDtoToUserCreate } from "./auth.mappers";
+
 import { ApiError } from "../../lib/errors/api-error";
+import { prisma } from "../../lib/prisma";
+import { recordSecurityAudit } from "../../lib/service/security-audit";
+import { writeAuditEvent } from "../../lib/service/audit";
+import { withTx } from "../../lib/service/tx";
+import { parseDto } from "../../lib/service/zod";
 import {
   buildSessionCookieValue,
   clearSessionCookie,
@@ -21,6 +21,8 @@ import {
   verifySessionSecret,
 } from "../../lib/session-auth";
 import { verificationService } from "../verification/verification.service";
+import { registerDto } from "./auth.dto";
+import { mapRegisterDtoToUserCreate } from "./auth.mappers";
 
 export async function registerUser(input: unknown) {
   const dto = parseDto(registerDto, input);
@@ -91,13 +93,19 @@ class AuthService {
       where: {
         OR: [{ email: identifier.toLowerCase() }, { username: identifier }],
       },
-      include: {
-        profile: true,
-        roles: true,
-      },
+      include: { profile: true, roles: true },
     });
 
     if (!user) {
+      await recordSecurityAudit({
+        actorType: "ANONYMOUS",
+        actorId: null,
+        action: "AUTH_LOGIN_FAILED",
+        resourceType: "AUTH_SESSION",
+        resourceId: null,
+        req,
+        metadata: { identifier },
+      });
       throw new ApiError({
         statusCode: 401,
         code: "LOGIN_INVALID_CREDENTIALS",
@@ -106,6 +114,15 @@ class AuthService {
     }
 
     if (user.status === "SUSPENDED" || user.status === "CLOSED") {
+      await recordSecurityAudit({
+        actorType: "USER",
+        actorId: user.id,
+        action: "AUTH_LOGIN_BLOCKED",
+        resourceType: "AUTH_SESSION",
+        resourceId: null,
+        req,
+        metadata: { status: user.status },
+      });
       throw new ApiError({
         statusCode: 403,
         code: "ACCOUNT_UNAVAILABLE",
@@ -115,6 +132,15 @@ class AuthService {
 
     const passwordOk = await argon2.verify(user.passwordHash, password);
     if (!passwordOk) {
+      await recordSecurityAudit({
+        actorType: "USER",
+        actorId: user.id,
+        action: "AUTH_LOGIN_FAILED",
+        resourceType: "AUTH_SESSION",
+        resourceId: null,
+        req,
+        metadata: { identifier },
+      });
       throw new ApiError({
         statusCode: 401,
         code: "LOGIN_INVALID_CREDENTIALS",
@@ -125,7 +151,6 @@ class AuthService {
     const secret = createSessionSecret();
     const refreshTokenHash = await hashSessionSecret(secret);
     const expiresAt = getSessionExpiryDate();
-
     const session = await prisma.session.create({
       data: {
         userId: user.id,
@@ -138,6 +163,19 @@ class AuthService {
 
     const cookieValue = buildSessionCookieValue(session.id, secret);
     setSessionCookie(res, cookieValue, expiresAt);
+
+    await recordSecurityAudit({
+      actorType: "USER",
+      actorId: user.id,
+      action: "AUTH_LOGIN_SUCCEEDED",
+      resourceType: "AUTH_SESSION",
+      resourceId: session.id,
+      req,
+      metadata: {
+        sessionId: session.id,
+        expiresAtUtc: session.expiresAt.toISOString(),
+      },
+    });
 
     return {
       ok: true,
@@ -163,7 +201,6 @@ class AuthService {
 
   async getSession(req: Request) {
     const auth = await this.resolveAuthFromRequest(req);
-
     if (!auth) {
       throw new ApiError({
         statusCode: 401,
@@ -212,27 +249,35 @@ class AuthService {
   }
 
   async logout(req: Request, res: Response) {
+    const auth = await this.resolveAuthFromRequest(req);
     const parsed = parseSessionCookieValue(getCookieFromRequest(req, SESSION_COOKIE_NAME));
 
     if (parsed?.sessionId) {
       await prisma.session.updateMany({
-        where: {
-          id: parsed.sessionId,
-          revokedAt: null,
-        },
-        data: {
-          revokedAt: new Date(),
-        },
+        where: { id: parsed.sessionId, revokedAt: null },
+        data: { revokedAt: new Date() },
       });
     }
 
     clearSessionCookie(res);
+
+    await recordSecurityAudit({
+      actorType: auth?.userId ? "USER" : "ANONYMOUS",
+      actorId: auth?.userId ?? null,
+      action: "AUTH_LOGOUT",
+      resourceType: "AUTH_SESSION",
+      resourceId: parsed?.sessionId ?? null,
+      req,
+      metadata: {
+        sessionId: parsed?.sessionId ?? null,
+      },
+    });
+
     return { ok: true };
   }
 
   async requestPasswordReset(body: RequestPasswordResetBody) {
     const email = body?.email?.trim().toLowerCase();
-
     if (!email) {
       throw new ApiError({
         statusCode: 400,
@@ -241,7 +286,18 @@ class AuthService {
       });
     }
 
-    return verificationService.requestPasswordReset(email);
+    const result = await verificationService.requestPasswordReset(email);
+
+    await recordSecurityAudit({
+      actorType: "ANONYMOUS",
+      actorId: null,
+      action: "AUTH_PASSWORD_RESET_REQUESTED",
+      resourceType: "PASSWORD_RESET",
+      resourceId: null,
+      metadata: { email },
+    });
+
+    return result;
   }
 
   async resetPassword(body: ResetPasswordBody) {
@@ -264,7 +320,18 @@ class AuthService {
       });
     }
 
-    return verificationService.resetPassword(token, newPassword);
+    const result = await verificationService.resetPassword(token, newPassword);
+
+    await recordSecurityAudit({
+      actorType: "ANONYMOUS",
+      actorId: null,
+      action: "AUTH_PASSWORD_RESET_COMPLETED",
+      resourceType: "PASSWORD_RESET",
+      resourceId: null,
+      metadata: { tokenPresent: Boolean(token) },
+    });
+
+    return result;
   }
 
   async sendOtp(userId: string, body: SendOtpBody) {
@@ -327,6 +394,18 @@ class AuthService {
       },
     });
 
+    await recordSecurityAudit({
+      actorType: "USER",
+      actorId: userId,
+      action: "AUTH_OTP_SENT",
+      resourceType: "OTP_CHALLENGE",
+      resourceId: null,
+      metadata: {
+        channel,
+        expiresAtUtc: expiresAt.toISOString(),
+      },
+    });
+
     return {
       ok: true,
       message:
@@ -372,7 +451,7 @@ class AuthService {
     }
 
     const codeHash = this.hashVerificationCode(code);
-    if (codeHash !== record.codeHash) {
+    if (codeHash != record.codeHash) {
       throw new ApiError({
         statusCode: 400,
         code: "OTP_INVALID",
@@ -392,6 +471,15 @@ class AuthService {
         data: { consumedAt: now },
       }),
     ]);
+
+    await recordSecurityAudit({
+      actorType: "USER",
+      actorId: userId,
+      action: "AUTH_OTP_VERIFIED",
+      resourceType: "OTP_CHALLENGE",
+      resourceId: record.id,
+      metadata: { channel },
+    });
 
     return {
       ok: true,
@@ -415,7 +503,6 @@ class AuthService {
       where: { id: parsed.sessionId },
       include: { user: true },
     });
-
     if (!session) return null;
     if (session.revokedAt) return null;
     if (session.expiresAt.getTime() <= Date.now()) return null;
@@ -437,7 +524,6 @@ class AuthService {
     if (typeof xff === "string" && xff.length > 0) {
       return xff.split(",")[0].trim();
     }
-
     return req.socket.remoteAddress ?? null;
   }
 

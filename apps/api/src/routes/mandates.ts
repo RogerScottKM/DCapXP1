@@ -1,10 +1,12 @@
 import { Router } from "express";
 import type { Response } from "express";
+
 import { z } from "zod";
 
-import { prisma } from "../prisma";
+import { auditPrivilegedRequest } from "../middleware/audit-privileged";
 import { requireUser, type AuthedRequest } from "../middleware/auth";
 import { requireLiveModeEligible, requireRecentMfa } from "../middleware/require-auth";
+import { prisma } from "../prisma";
 import { parseDecimalToBigInt } from "../utils/quantums";
 
 const router = Router();
@@ -26,10 +28,10 @@ router.post(
   requireUser,
   requireRecentMfa(),
   requireLiveModeEligible(),
+  auditPrivilegedRequest("MANDATE_ISSUE_REQUESTED", "MANDATE", (req) => String(req.params.agentId)),
   async (req: AuthedRequest, res: Response) => {
     const agentId = String(req.params.agentId);
     const body = issueMandateSchema.parse(req.body);
-
     const agent = await prisma.agent.findFirst({
       where: { id: agentId, userId: req.user!.id },
     });
@@ -39,9 +41,10 @@ router.post(
     }
 
     const quoteDecimals = body.quoteDecimals ?? 6;
-    const maxNotionalPerDay = body.maxNotionalPerDay && body.maxNotionalPerDay !== "0"
-      ? parseDecimalToBigInt(body.maxNotionalPerDay, quoteDecimals)
-      : 0n;
+    const maxNotionalPerDay =
+      body.maxNotionalPerDay && body.maxNotionalPerDay !== "0"
+        ? parseDecimalToBigInt(body.maxNotionalPerDay, quoteDecimals)
+        : 0n;
 
     const mandate = await prisma.mandate.create({
       data: {
@@ -64,34 +67,45 @@ router.post(
 
 router.get("/agents/:agentId", requireUser, async (req: AuthedRequest, res: Response) => {
   const agentId = String(req.params.agentId);
-  const agent = await prisma.agent.findFirst({ where: { id: agentId, userId: req.user!.id } });
+  const agent = await prisma.agent.findFirst({
+    where: { id: agentId, userId: req.user!.id },
+  });
 
   if (!agent) {
     return res.status(404).json({ error: "Agent not found" });
   }
 
-  const mandates = await prisma.mandate.findMany({ where: { agentId }, orderBy: { createdAt: "desc" } });
+  const mandates = await prisma.mandate.findMany({
+    where: { agentId },
+    orderBy: { createdAt: "desc" },
+  });
+
   res.json({ ok: true, mandates });
 });
 
-router.post("/:mandateId/revoke", requireUser, requireRecentMfa(), async (req: AuthedRequest, res: Response) => {
-  const mandateId = String(req.params.mandateId);
+router.post(
+  "/:mandateId/revoke",
+  requireUser,
+  requireRecentMfa(),
+  auditPrivilegedRequest("MANDATE_REVOKE_REQUESTED", "MANDATE", (req) => String(req.params.mandateId)),
+  async (req: AuthedRequest, res: Response) => {
+    const mandateId = String(req.params.mandateId);
+    const mandate = await prisma.mandate.findUnique({
+      where: { id: mandateId },
+      include: { agent: true },
+    });
 
-  const mandate = await prisma.mandate.findUnique({
-    where: { id: mandateId },
-    include: { agent: true },
-  });
+    if (!mandate || mandate.agent.userId !== req.user!.id) {
+      return res.status(404).json({ error: "Mandate not found" });
+    }
 
-  if (!mandate || mandate.agent.userId !== req.user!.id) {
-    return res.status(404).json({ error: "Mandate not found" });
-  }
+    await prisma.mandate.update({
+      where: { id: mandateId },
+      data: { status: "REVOKED", revokedAt: new Date() },
+    });
 
-  await prisma.mandate.update({
-    where: { id: mandateId },
-    data: { status: "REVOKED", revokedAt: new Date() },
-  });
-
-  res.json({ ok: true });
-});
+    res.json({ ok: true });
+  },
+);
 
 export default router;

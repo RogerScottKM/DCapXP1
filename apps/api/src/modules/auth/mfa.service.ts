@@ -4,6 +4,7 @@ import { authenticator } from "otplib";
 
 import { ApiError } from "../../lib/errors/api-error";
 import { prisma } from "../../lib/prisma";
+import { recordSecurityAudit } from "../../lib/service/security-audit";
 
 authenticator.options = {
   step: 30,
@@ -31,8 +32,14 @@ type RecoveryCodeChallengeInput = {
   code?: string;
 };
 
+type AuditContext = {
+  sessionId?: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+};
+
 class MfaService {
-  async beginTotpEnrollment(userId: string, input: BeginEnrollmentInput) {
+  async beginTotpEnrollment(userId: string, input: BeginEnrollmentInput, auditContext: AuditContext = {}) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, email: true, username: true },
@@ -86,6 +93,19 @@ class MfaService {
     const accountName = user.email || user.username || user.id;
     const otpauthUrl = authenticator.keyuri(accountName, issuer, secret);
 
+    await recordSecurityAudit({
+      actorId: userId,
+      action: "MFA_TOTP_ENROLLMENT_STARTED",
+      resourceType: "MFA_FACTOR",
+      resourceId: factor.id,
+      metadata: {
+        method: "TOTP",
+        label: factor.label,
+      },
+      ipAddress: auditContext.ipAddress ?? null,
+      userAgent: auditContext.userAgent ?? null,
+    });
+
     return {
       ok: true,
       factorId: factor.id,
@@ -96,7 +116,12 @@ class MfaService {
     };
   }
 
-  async activateTotpEnrollment(userId: string, input: ActivateEnrollmentInput) {
+  async activateTotpEnrollment(
+    userId: string,
+    sessionId: string | undefined,
+    input: ActivateEnrollmentInput,
+    auditContext: AuditContext = {},
+  ) {
     const factorId = input.factorId?.trim();
     const token = input.token?.trim();
 
@@ -132,9 +157,10 @@ class MfaService {
     }
 
     const now = new Date();
+    let revokedOtherSessions = 0;
 
-    await prisma.$transaction([
-      prisma.mfaFactor.updateMany({
+    await prisma.$transaction(async (tx) => {
+      await tx.mfaFactor.updateMany({
         where: {
           userId,
           type: "TOTP",
@@ -142,22 +168,91 @@ class MfaService {
           id: { not: factor.id },
         },
         data: { status: "REVOKED", revokedAt: now },
-      }),
-      prisma.mfaFactor.update({
+      });
+
+      await tx.mfaFactor.update({
         where: { id: factor.id },
         data: { status: "ACTIVE", activatedAt: now, revokedAt: null },
-      }),
-    ]);
+      });
+
+      if (sessionId) {
+        const revoked = await tx.session.updateMany({
+          where: {
+            userId,
+            revokedAt: null,
+            id: { not: sessionId },
+          },
+          data: {
+            revokedAt: now,
+            mfaMethod: null,
+            mfaVerifiedAt: null,
+          },
+        });
+        revokedOtherSessions = revoked.count;
+
+        await tx.session.updateMany({
+          where: { id: sessionId },
+          data: {
+            mfaMethod: null,
+            mfaVerifiedAt: null,
+          },
+        });
+      } else {
+        const revoked = await tx.session.updateMany({
+          where: { userId, revokedAt: null },
+          data: {
+            revokedAt: now,
+            mfaMethod: null,
+            mfaVerifiedAt: null,
+          },
+        });
+        revokedOtherSessions = revoked.count;
+      }
+    });
+
+    await recordSecurityAudit({
+      actorId: userId,
+      action: "MFA_TOTP_ENROLLMENT_ACTIVATED",
+      resourceType: "MFA_FACTOR",
+      resourceId: factor.id,
+      metadata: {
+        method: "TOTP",
+        revokedOtherSessions,
+      },
+      ipAddress: auditContext.ipAddress ?? null,
+      userAgent: auditContext.userAgent ?? null,
+    });
+
+    if (revokedOtherSessions > 0) {
+      await recordSecurityAudit({
+        actorId: userId,
+        action: "SESSION_REVOKED_AFTER_MFA_CHANGE",
+        resourceType: "SESSION",
+        resourceId: sessionId ?? null,
+        metadata: {
+          method: "TOTP",
+          revokedOtherSessions,
+        },
+        ipAddress: auditContext.ipAddress ?? null,
+        userAgent: auditContext.userAgent ?? null,
+      });
+    }
 
     return {
       ok: true,
       factorId: factor.id,
       activatedAtUtc: now.toISOString(),
       method: "TOTP",
+      revokedOtherSessions,
     };
   }
 
-  async challengeTotp(userId: string, sessionId: string | undefined, input: ChallengeInput) {
+  async challengeTotp(
+    userId: string,
+    sessionId: string | undefined,
+    input: ChallengeInput,
+    auditContext: AuditContext = {},
+  ) {
     const token = input.token?.trim();
 
     if (!token) {
@@ -206,13 +301,24 @@ class MfaService {
     }
 
     const now = new Date();
-
     await prisma.session.update({
       where: { id: sessionId },
       data: {
         mfaMethod: "TOTP",
         mfaVerifiedAt: now,
       },
+    });
+
+    await recordSecurityAudit({
+      actorId: userId,
+      action: "MFA_CHALLENGE_SUCCEEDED",
+      resourceType: "MFA_FACTOR",
+      resourceId: factor.id,
+      metadata: {
+        method: "TOTP",
+      },
+      ipAddress: auditContext.ipAddress ?? null,
+      userAgent: auditContext.userAgent ?? null,
     });
 
     return {
@@ -222,7 +328,12 @@ class MfaService {
     };
   }
 
-  async regenerateRecoveryCodes(userId: string, input: RecoveryCodesInput = {}) {
+  async regenerateRecoveryCodes(
+    userId: string,
+    sessionId: string | undefined,
+    input: RecoveryCodesInput = {},
+    auditContext: AuditContext = {},
+  ) {
     const activeFactor = await prisma.mfaFactor.findFirst({
       where: {
         userId,
@@ -249,20 +360,81 @@ class MfaService {
 
     const recoveryCodes = Array.from({ length: count }, () => this.generateRecoveryCode());
     const now = new Date();
+    let revokedOtherSessions = 0;
 
-    await prisma.$transaction([
-      prisma.mfaRecoveryCode.deleteMany({
-        where: { userId },
-      }),
-      prisma.mfaRecoveryCode.createMany({
+    await prisma.$transaction(async (tx) => {
+      await tx.mfaRecoveryCode.deleteMany({ where: { userId } });
+      await tx.mfaRecoveryCode.createMany({
         data: recoveryCodes.map((code) => ({
           userId,
           codeHash: this.hashRecoveryCode(code),
           consumedAt: null,
           createdAt: now,
         })),
-      }),
-    ]);
+      });
+
+      if (sessionId) {
+        const revoked = await tx.session.updateMany({
+          where: {
+            userId,
+            revokedAt: null,
+            id: { not: sessionId },
+          },
+          data: {
+            revokedAt: now,
+            mfaMethod: null,
+            mfaVerifiedAt: null,
+          },
+        });
+        revokedOtherSessions = revoked.count;
+
+        await tx.session.updateMany({
+          where: { id: sessionId },
+          data: {
+            mfaMethod: null,
+            mfaVerifiedAt: null,
+          },
+        });
+      } else {
+        const revoked = await tx.session.updateMany({
+          where: { userId, revokedAt: null },
+          data: {
+            revokedAt: now,
+            mfaMethod: null,
+            mfaVerifiedAt: null,
+          },
+        });
+        revokedOtherSessions = revoked.count;
+      }
+    });
+
+    await recordSecurityAudit({
+      actorId: userId,
+      action: "MFA_RECOVERY_CODES_REGENERATED",
+      resourceType: "MFA_RECOVERY_CODE_SET",
+      resourceId: userId,
+      metadata: {
+        count,
+        revokedOtherSessions,
+      },
+      ipAddress: auditContext.ipAddress ?? null,
+      userAgent: auditContext.userAgent ?? null,
+    });
+
+    if (revokedOtherSessions > 0) {
+      await recordSecurityAudit({
+        actorId: userId,
+        action: "SESSION_REVOKED_AFTER_MFA_CHANGE",
+        resourceType: "SESSION",
+        resourceId: sessionId ?? null,
+        metadata: {
+          method: "RECOVERY_CODE",
+          revokedOtherSessions,
+        },
+        ipAddress: auditContext.ipAddress ?? null,
+        userAgent: auditContext.userAgent ?? null,
+      });
+    }
 
     return {
       ok: true,
@@ -270,6 +442,7 @@ class MfaService {
       count,
       generatedAtUtc: now.toISOString(),
       method: "RECOVERY_CODE",
+      revokedOtherSessions,
     };
   }
 
@@ -277,6 +450,7 @@ class MfaService {
     userId: string,
     sessionId: string | undefined,
     input: RecoveryCodeChallengeInput,
+    auditContext: AuditContext = {},
   ) {
     const code = input.code?.trim();
 
@@ -315,7 +489,6 @@ class MfaService {
     }
 
     const now = new Date();
-
     await prisma.$transaction([
       prisma.mfaRecoveryCode.update({
         where: { id: record.id },
@@ -330,6 +503,18 @@ class MfaService {
       }),
     ]);
 
+    await recordSecurityAudit({
+      actorId: userId,
+      action: "MFA_CHALLENGE_SUCCEEDED",
+      resourceType: "MFA_RECOVERY_CODE",
+      resourceId: record.id,
+      metadata: {
+        method: "RECOVERY_CODE",
+      },
+      ipAddress: auditContext.ipAddress ?? null,
+      userAgent: auditContext.userAgent ?? null,
+    });
+
     return {
       ok: true,
       method: "RECOVERY_CODE",
@@ -343,12 +528,12 @@ class MfaService {
     const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
     const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
     const tag = cipher.getAuthTag();
-
     return [iv.toString("base64"), tag.toString("base64"), encrypted.toString("base64")].join(".");
   }
 
   private decryptSecret(secretEncrypted: string): string {
     const [ivB64, tagB64, dataB64] = secretEncrypted.split(".");
+
     if (!ivB64 || !tagB64 || !dataB64) {
       throw new ApiError({
         statusCode: 500,
@@ -360,6 +545,7 @@ class MfaService {
     const key = this.deriveKey();
     const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivB64, "base64"));
     decipher.setAuthTag(Buffer.from(tagB64, "base64"));
+
     const decrypted = Buffer.concat([
       decipher.update(Buffer.from(dataB64, "base64")),
       decipher.final(),
@@ -370,6 +556,7 @@ class MfaService {
 
   private deriveKey(): Buffer {
     const raw = process.env.MFA_TOTP_ENCRYPTION_KEY?.trim();
+
     if (!raw) {
       throw new ApiError({
         statusCode: 500,

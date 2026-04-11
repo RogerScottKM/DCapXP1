@@ -1336,3 +1336,75 @@ model MfaRecoveryCode {
 
   @@index([userId, consumedAt])
 }
+
+enum LedgerAccountOwnerType {
+  SYSTEM
+  USER
+}
+
+enum LedgerAccountType {
+  USER_AVAILABLE
+  USER_HELD
+  EXCHANGE_INVENTORY
+  FEE_REVENUE
+  TREASURY
+  SUSPENSE
+}
+
+enum LedgerTransactionStatus {
+  POSTED
+  VOIDED
+}
+
+enum LedgerPostingSide {
+  DEBIT
+  CREDIT
+}
+
+model LedgerAccount {
+  id          String                 @id @default(cuid())
+  ownerType   LedgerAccountOwnerType
+  ownerRef    String
+  assetCode   String
+  mode        TradeMode
+  accountType LedgerAccountType
+  status      String                 @default("ACTIVE")
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @default(now()) @updatedAt
+  postings    LedgerPosting[]
+
+  @@unique([ownerType, ownerRef, assetCode, mode, accountType])
+  @@index([assetCode, mode, accountType])
+  @@index([ownerType, ownerRef, mode])
+}
+
+model LedgerTransaction {
+  id            String                  @id @default(cuid())
+  referenceType String?
+  referenceId   String?
+  description   String?
+  status        LedgerTransactionStatus @default(POSTED)
+  metadata      Json?
+  createdAt     DateTime                @default(now())
+  postings      LedgerPosting[]
+
+  @@index([referenceType, referenceId])
+  @@index([createdAt])
+}
+
+model LedgerPosting {
+  id            String            @id @default(cuid())
+  transactionId String
+  accountId     String
+  assetCode     String
+  side          LedgerPostingSide
+  amount        Decimal           @db.Decimal(30, 10)
+  createdAt     DateTime          @default(now())
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account       LedgerAccount     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([accountId])
+  @@index([assetCode, createdAt])
+}
+

@@ -42,7 +42,8 @@
     "db:backfill:phase1": "tsx scripts/backfill-phase1.ts",
     "seed:demo": "tsx prisma/seed-demo-bootstrap.ts",
     "test": "vitest run",
-    "test:auth": "vitest run test/auth.service.audit.test.ts test/require-auth.audit.test.ts"
+    "test:auth": "vitest run test/auth.service.audit.test.ts test/require-auth.audit.test.ts",
+    "test:ledger": "vitest run test/ledger.posting.test.ts"
   },
   "type": "commonjs"
 }

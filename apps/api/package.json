@@ -44,7 +44,8 @@
     "test": "vitest run",
     "test:auth": "vitest run test/auth.service.audit.test.ts test/require-auth.audit.test.ts",
     "test:ledger": "vitest run test/ledger.posting.test.ts",
-    "test:ledger:lifecycle": "vitest run -- ledger.order-lifecycle.test.ts"
+    "test:ledger:lifecycle": "vitest run -- ledger.order-lifecycle.test.ts",
+    "test:ledger:settlement": "vitest run -- ledger.reconciliation.test.ts"
   },
   "type": "commonjs"
 }

@@ -43,7 +43,8 @@
     "seed:demo": "tsx prisma/seed-demo-bootstrap.ts",
     "test": "vitest run",
     "test:auth": "vitest run test/auth.service.audit.test.ts test/require-auth.audit.test.ts",
-    "test:ledger": "vitest run test/ledger.posting.test.ts"
+    "test:ledger": "vitest run test/ledger.posting.test.ts",
+    "test:ledger:lifecycle": "vitest run -- ledger.order-lifecycle.test.ts"
   },
   "type": "commonjs"
 }

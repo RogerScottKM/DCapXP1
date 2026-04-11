@@ -8,6 +8,7 @@ import {
   executeLimitOrderAgainstBook,
   getOrderRemainingQty,
   reconcileOrderExecution,
+  syncOrderStatusFromTrades,
   reconcileTradeSettlement,
   releaseOrderOnCancel,
   reserveOrderOnPlacement,
@@ -213,20 +214,22 @@ router.post("/fills/demo", enforceMandate("TRADE"), async (req: any, res) => {
         tx,
       );
 
-      await tx.order.updateMany({
-        where: {
-          id: { in: [buyOrder.id, sellOrder.id] },
-        },
-        data: {
-          status: "FILLED",
-        },
-      });
+      const updatedBuyOrder = await syncOrderStatusFromTrades(buyOrder.id, tx);
+      const updatedSellOrder = await syncOrderStatusFromTrades(sellOrder.id, tx);
 
       const reconciliation = await reconcileTradeSettlement(trade.id, tx);
-      const buyOrderReconciliation = await reconcileOrderExecution(buyOrder.id, tx);
-      const sellOrderReconciliation = await reconcileOrderExecution(sellOrder.id, tx);
+      const buyOrderReconciliation = await reconcileOrderExecution(updatedBuyOrder.id, tx);
+      const sellOrderReconciliation = await reconcileOrderExecution(updatedSellOrder.id, tx);
 
-      return { trade, ledgerSettlement, reconciliation, buyOrderReconciliation, sellOrderReconciliation };
+      return {
+        trade,
+        ledgerSettlement,
+        reconciliation,
+        buyOrder: updatedBuyOrder,
+        sellOrder: updatedSellOrder,
+        buyOrderReconciliation,
+        sellOrderReconciliation,
+      };
     });
 
     return res.json({ ok: true, ...result });

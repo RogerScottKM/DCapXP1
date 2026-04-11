@@ -10,6 +10,7 @@ import {
 import { prisma } from "../prisma";
 import { ensureUserLedgerAccounts } from "./accounts";
 import { settleMatchedTrade } from "./order-lifecycle";
+import { assertExecutedQtyWithinOrder, computeRemainingQty, deriveOrderStatus } from "./order-state";
 import { reconcileTradeSettlement } from "./reconciliation";
 import { postLedgerTransaction } from "./service";
 
@@ -93,17 +94,23 @@ export async function getOrderRemainingQty(
   db: LedgerDbClient = prisma,
 ): Promise<Decimal> {
   const executed = await getOrderExecutedQty(order.id, db);
-  const remaining = new Decimal(order.qty).minus(executed);
-  return remaining.lessThan(0) ? new Decimal(0) : remaining;
+  assertExecutedQtyWithinOrder(order.qty, executed);
+  return computeRemainingQty(order.qty, executed);
 }
 
-async function syncOrderStatus(orderId: bigint, db: LedgerDbClient): Promise<Order> {
-  const order = await db.order.findUniqueOrThrow({ where: { id: orderId } });
-  const remaining = await getOrderRemainingQty(order, db);
+export async function syncOrderStatusFromTrades(
+  orderId: bigint | string,
+  db: LedgerDbClient = prisma,
+): Promise<Order> {
+  const normalizedId = BigInt(String(orderId));
+  const order = await db.order.findUniqueOrThrow({ where: { id: normalizedId } });
+  const executed = await getOrderExecutedQty(order.id, db);
+  assertExecutedQtyWithinOrder(order.qty, executed);
+
   return db.order.update({
-    where: { id: orderId },
+    where: { id: order.id },
     data: {
-      status: remaining.lessThanOrEqualTo(0) ? "FILLED" : "OPEN",
+      status: deriveOrderStatus(order.status, order.qty, executed) as Order["status"],
     },
   });
 }
@@ -273,8 +280,8 @@ export async function executeLimitOrderAgainstBook(
 
     const reconciliation = await reconcileTradeSettlement(trade.id, db);
 
-    await syncOrderStatus(buyOrder.id, db);
-    await syncOrderStatus(sellOrder.id, db);
+    await syncOrderStatusFromTrades(buyOrder.id, db);
+    await syncOrderStatusFromTrades(sellOrder.id, db);
 
     fills.push({
       trade,
@@ -317,16 +324,22 @@ export async function reconcileOrderExecution(orderId: string | bigint, db: Ledg
     : [];
 
   const executedQty = trades.reduce((acc, trade) => acc.plus(new Decimal(trade.qty)), new Decimal(0));
-  const remainingQty = new Decimal(order.qty).minus(executedQty);
-  const safeRemaining = remainingQty.lessThan(0) ? new Decimal(0) : remainingQty;
+  assertExecutedQtyWithinOrder(order.qty, executedQty);
+  const safeRemaining = computeRemainingQty(order.qty, executedQty);
 
   if (ledgerTransactions.length !== trades.length) {
     throw new Error("Trade to ledger transaction count mismatch for order reconciliation.");
   }
 
+  const expectedStatus = deriveOrderStatus(order.status, order.qty, executedQty);
+  if (order.status !== expectedStatus) {
+    throw new Error(`Order status mismatch: expected ${expectedStatus}, got ${order.status}`);
+  }
+
   return {
     orderId: String(order.id),
     status: order.status,
+    expectedStatus,
     tradeCount: trades.length,
     ledgerTransactionCount: ledgerTransactions.length,
     executedQty: executedQty.toString(),

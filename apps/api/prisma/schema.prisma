@@ -38,7 +38,9 @@ enum OrderSide {
 
 enum OrderStatus {
   OPEN
+  PARTIALLY_FILLED
   FILLED
+  CANCEL_PENDING
   CANCELLED
 }
 

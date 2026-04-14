@@ -9,6 +9,7 @@ const registerLimiter = (0, simple_rate_limit_1.simpleRateLimit)({ keyPrefix: "a
 const loginLimiter = (0, simple_rate_limit_1.simpleRateLimit)({ keyPrefix: "auth:login", windowMs: 10 * 60 * 1000, max: 20 });
 const passwordLimiter = (0, simple_rate_limit_1.simpleRateLimit)({ keyPrefix: "auth:password", windowMs: 10 * 60 * 1000, max: 10 });
 const otpLimiter = (0, simple_rate_limit_1.simpleRateLimit)({ keyPrefix: "auth:otp", windowMs: 10 * 60 * 1000, max: 10 });
+const mfaLimiter = (0, simple_rate_limit_1.simpleRateLimit)({ keyPrefix: "auth:mfa", windowMs: 10 * 60 * 1000, max: 20 });
 router.post("/auth/register", registerLimiter, auth_controller_1.register);
 router.post("/auth/login", loginLimiter, auth_controller_1.login);
 router.get("/auth/session", auth_controller_1.getSession);
@@ -17,4 +18,9 @@ router.post("/auth/request-password-reset", passwordLimiter, auth_controller_1.r
 router.post("/auth/reset-password", passwordLimiter, auth_controller_1.resetPassword);
 router.post("/auth/send-otp", require_auth_1.requireAuth, otpLimiter, auth_controller_1.sendOtp);
 router.post("/auth/verify-otp", require_auth_1.requireAuth, otpLimiter, auth_controller_1.verifyOtp);
+router.post("/auth/mfa/totp/enroll", require_auth_1.requireAuth, mfaLimiter, auth_controller_1.enrollTotp);
+router.post("/auth/mfa/totp/activate", require_auth_1.requireAuth, mfaLimiter, auth_controller_1.activateTotp);
+router.post("/auth/mfa/totp/challenge", require_auth_1.requireAuth, mfaLimiter, auth_controller_1.challengeTotp);
+router.post("/auth/mfa/recovery-codes/regenerate", require_auth_1.requireAuth, (0, require_auth_1.requireRecentMfa)(), mfaLimiter, auth_controller_1.regenerateRecoveryCodes);
+router.post("/auth/mfa/recovery-codes/challenge", require_auth_1.requireAuth, mfaLimiter, auth_controller_1.challengeRecoveryCode);
 exports.default = router;

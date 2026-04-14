@@ -4,22 +4,27 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const crypto_1 = __importDefault(require("crypto"));
-const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
-const kyc_routes_1 = __importDefault(require("./modules/kyc/kyc.routes"));
-const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
-const onboarding_routes_1 = __importDefault(require("./modules/onboarding/onboarding.routes"));
+const express_1 = __importDefault(require("express"));
+const helmet_1 = __importDefault(require("helmet"));
 const advisor_routes_1 = __importDefault(require("./modules/advisor/advisor.routes"));
-const invitations_routes_1 = __importDefault(require("./modules/invitations/invitations.routes"));
-const uploads_routes_1 = __importDefault(require("./modules/uploads/uploads.routes"));
+const auth_routes_1 = __importDefault(require("./modules/auth/auth.routes"));
 const consents_routes_1 = __importDefault(require("./modules/consents/consents.routes"));
+const invitations_routes_1 = __importDefault(require("./modules/invitations/invitations.routes"));
+const kyc_routes_1 = __importDefault(require("./modules/kyc/kyc.routes"));
+const onboarding_routes_1 = __importDefault(require("./modules/onboarding/onboarding.routes"));
 const referrals_routes_1 = __importDefault(require("./modules/referrals/referrals.routes"));
-const market_1 = __importDefault(require("./routes/market"));
-const trade_1 = __importDefault(require("./routes/trade"));
-const stream_1 = __importDefault(require("./routes/stream"));
+const uploads_routes_1 = __importDefault(require("./modules/uploads/uploads.routes"));
 const verification_routes_1 = __importDefault(require("./modules/verification/verification.routes"));
+const admin_1 = __importDefault(require("./routes/admin"));
+const agentic_1 = __importDefault(require("./routes/agentic"));
+const agents_1 = __importDefault(require("./routes/agents"));
+const mandates_1 = __importDefault(require("./routes/mandates"));
+const market_1 = __importDefault(require("./routes/market"));
+const stream_1 = __importDefault(require("./routes/stream"));
+const trade_1 = __importDefault(require("./routes/trade"));
 const app = (0, express_1.default)();
-const corsOrigins = (process.env.APP_CORS_ORIGINS ?? "http://localhost:3002,http://localhost:53002")
+const corsOrigins = (process.env.APP_CORS_ORIGINS ?? "http://localhost:3000")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
@@ -34,7 +39,9 @@ const apiRouters = [
     kyc_routes_1.default,
     referrals_routes_1.default,
 ];
-app.set("trust proxy", process.env.TRUST_PROXY === "1");
+const trustProxy = process.env.TRUST_PROXY;
+app.set("trust proxy", trustProxy === "1" || trustProxy === "true");
+app.disable("x-powered-by");
 app.set("json replacer", (_key, value) => {
     return typeof value === "bigint" ? value.toString() : value;
 });
@@ -44,15 +51,21 @@ app.use((req, res, next) => {
     res.setHeader("x-request-id", requestId);
     next();
 });
+app.use((0, helmet_1.default)({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+}));
 app.use((_, res, next) => {
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("X-Frame-Options", "DENY");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=() ");
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     next();
 });
 app.use((0, cors_1.default)({
-    origin: corsOrigins,
+    origin(origin, callback) {
+        if (!origin || corsOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(new Error("Origin not allowed by CORS"));
+    },
     credentials: true,
 }));
 app.use(express_1.default.json({ limit: "100kb" }));
@@ -63,17 +76,42 @@ app.get("/health", (_req, res) => {
 app.get("/ready", (_req, res) => {
     res.json({ ok: true });
 });
-for (const router of apiRouters) {
-    app.use("/api", router);
-    app.use("/backend-api", router);
+for (const prefix of ["/api", "/backend-api"]) {
+    for (const router of apiRouters) {
+        app.use(prefix, router);
+    }
 }
-app.use(market_1.default);
-app.use(trade_1.default);
-app.use(stream_1.default);
-app.use("/v1/market", market_1.default);
-app.use("/api/v1/market", market_1.default);
-app.use("/v1/stream", stream_1.default);
-app.use("/api/v1/stream", stream_1.default);
+for (const prefix of ["/api/admin", "/admin"]) {
+    app.use(prefix, admin_1.default);
+}
+for (const prefix of ["/api/v1/agents", "/v1/agents"]) {
+    app.use(prefix, agents_1.default);
+}
+for (const prefix of ["/api/v1/mandates", "/v1/mandates"]) {
+    app.use(prefix, mandates_1.default);
+}
+for (const prefix of ["/api/v1/ui", "/v1/ui"]) {
+    app.use(prefix, agentic_1.default);
+}
+for (const prefix of ["", "/v1/market", "/api/v1/market"]) {
+    app.use(prefix, market_1.default);
+}
+for (const prefix of ["", "/v1/trade", "/api/v1/trade"]) {
+    app.use(prefix, trade_1.default);
+}
+for (const prefix of ["", "/v1/stream", "/api/v1/stream"]) {
+    app.use(prefix, stream_1.default);
+}
+app.use((req, res) => {
+    const requestId = req.requestId;
+    res.status(404).json({
+        error: {
+            code: "NOT_FOUND",
+            message: "Route not found.",
+        },
+        requestId,
+    });
+});
 app.use((err, req, res, _next) => {
     const status = err.statusCode || 500;
     const requestId = req.requestId;

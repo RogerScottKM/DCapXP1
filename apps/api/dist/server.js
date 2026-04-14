@@ -1,13 +1,12 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
-const app_1 = __importDefault(require("./app"));
-const prisma_1 = require("./lib/prisma");
+const bootstrap_secrets_1 = require("./lib/bootstrap-secrets");
 const PORT = Number(process.env.API_PORT ?? process.env.PORT ?? 4010);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+let server = null;
+let shuttingDown = false;
+let prismaClient = null;
 function requireEnv(name) {
     if (!process.env[name]?.trim()) {
         throw new Error(`Missing required environment variable: ${name}`);
@@ -23,8 +22,6 @@ function validateEnv() {
         requireEnv("EMAIL_FROM");
     }
 }
-let server = null;
-let shuttingDown = false;
 async function shutdown(signal) {
     if (shuttingDown) {
         return;
@@ -44,7 +41,9 @@ async function shutdown(signal) {
     }, 30_000);
     try {
         await closeServer;
-        await prisma_1.prisma.$disconnect();
+        if (prismaClient) {
+            await prismaClient.$disconnect();
+        }
         clearTimeout(forceExitTimer);
         process.exit(0);
     }
@@ -55,8 +54,14 @@ async function shutdown(signal) {
     }
 }
 async function main() {
+    await (0, bootstrap_secrets_1.bootstrapSecrets)();
     validateEnv();
-    server = app_1.default.listen(PORT, () => {
+    const appModule = await import("./app.js");
+    const prismaModule = await import("./lib/prisma.js");
+    const app = appModule.default;
+    const prisma = prismaModule.prisma;
+    prismaClient = prisma;
+    server = app.listen(PORT, () => {
         console.log(`api listening on ${PORT}`);
     });
 }

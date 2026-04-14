@@ -1,35 +1,40 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.requireAdminMfa = exports.requireMfa = void 0;
 exports.requireUser = requireUser;
-exports.requireMfa = requireMfa;
 exports.authFromJwt = authFromJwt;
 const api_error_1 = require("../lib/errors/api-error");
-const auth_service_1 = require("../modules/auth/auth.service");
-async function requireUser(req, _res, next) {
+const require_auth_1 = require("./require-auth");
+async function requireUser(req, res, next) {
     try {
-        const auth = await auth_service_1.authService.resolveAuthFromRequest(req);
-        if (!auth) {
+        await new Promise((resolve, reject) => {
+            void (0, require_auth_1.requireAuth)(req, res, (error) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve();
+            });
+        });
+        if (!req.auth) {
             throw new api_error_1.ApiError({
                 statusCode: 401,
                 code: "UNAUTHENTICATED",
                 message: "Authentication required.",
             });
         }
-        req.auth = auth;
-        req.user = { id: auth.userId, username: auth.userId };
+        req.user = {
+            id: req.auth.userId,
+            username: req.auth.userId,
+        };
         next();
     }
     catch (error) {
         next(error);
     }
 }
-function requireMfa(_req, _res, next) {
-    next(new api_error_1.ApiError({
-        statusCode: 501,
-        code: "MFA_NOT_IMPLEMENTED",
-        message: "Legacy development MFA bypass has been disabled. Wire this route to real TOTP/session step-up before enabling it in production.",
-    }));
-}
+exports.requireMfa = (0, require_auth_1.requireRecentMfa)();
+exports.requireAdminMfa = (0, require_auth_1.requireAdminRecentMfa)();
 function authFromJwt(_req, _res, next) {
     next(new api_error_1.ApiError({
         statusCode: 501,

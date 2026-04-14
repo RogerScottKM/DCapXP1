@@ -21,9 +21,7 @@ exports.notificationsConfig = {
         ? requireEnv("EMAIL_FROM")
         : process.env.EMAIL_FROM ?? "DCapX <no-reply@dcapitalx.local>",
     resendApiKey: process.env.RESEND_API_KEY ?? "",
-    otpHmacSecret: isProduction
-        ? requireEnv("OTP_HMAC_SECRET")
-        : process.env.OTP_HMAC_SECRET ?? "local-dev-only-otp-secret-change-me",
+    otpHmacSecret: requireEnv("OTP_HMAC_SECRET"),
     verificationOtpMinutes: Number(process.env.VERIFICATION_OTP_MINUTES ?? 10),
     resetLinkMinutes: Number(process.env.RESET_LINK_MINUTES ?? 30),
 };

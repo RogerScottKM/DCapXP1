@@ -1,11 +1,9 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.prisma = void 0;
-const client_1 = require("@prisma/client");
-exports.prisma = globalThis.__dcapx_prisma ??
-    new client_1.PrismaClient({
-    // log: ["error", "warn"], // optional
-    });
-if (process.env.NODE_ENV !== "production") {
-    globalThis.__dcapx_prisma = exports.prisma;
-}
+exports.default = exports.prisma = void 0;
+var prisma_1 = require("../lib/prisma");
+Object.defineProperty(exports, "prisma", { enumerable: true, get: function () { return prisma_1.prisma; } });
+Object.defineProperty(exports, "default", { enumerable: true, get: function () { return __importDefault(prisma_1).default; } });

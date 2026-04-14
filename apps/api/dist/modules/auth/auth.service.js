@@ -7,15 +7,16 @@ exports.authService = void 0;
 exports.registerUser = registerUser;
 const argon2_1 = __importDefault(require("argon2"));
 const crypto_1 = __importDefault(require("crypto"));
-const prisma_1 = require("../../lib/prisma");
-const tx_1 = require("../../lib/service/tx");
-const audit_1 = require("../../lib/service/audit");
-const zod_1 = require("../../lib/service/zod");
-const auth_dto_1 = require("./auth.dto");
-const auth_mappers_1 = require("./auth.mappers");
 const api_error_1 = require("../../lib/errors/api-error");
+const prisma_1 = require("../../lib/prisma");
+const security_audit_1 = require("../../lib/service/security-audit");
+const audit_1 = require("../../lib/service/audit");
+const tx_1 = require("../../lib/service/tx");
+const zod_1 = require("../../lib/service/zod");
 const session_auth_1 = require("../../lib/session-auth");
 const verification_service_1 = require("../verification/verification.service");
+const auth_dto_1 = require("./auth.dto");
+const auth_mappers_1 = require("./auth.mappers");
 async function registerUser(input) {
     const dto = (0, zod_1.parseDto)(auth_dto_1.registerDto, input);
     const passwordHash = await argon2_1.default.hash(crypto_1.default.randomBytes(32).toString("hex"));
@@ -56,12 +57,18 @@ class AuthService {
             where: {
                 OR: [{ email: identifier.toLowerCase() }, { username: identifier }],
             },
-            include: {
-                profile: true,
-                roles: true,
-            },
+            include: { profile: true, roles: true },
         });
         if (!user) {
+            await (0, security_audit_1.recordSecurityAudit)({
+                actorType: "ANONYMOUS",
+                actorId: null,
+                action: "AUTH_LOGIN_FAILED",
+                resourceType: "AUTH_SESSION",
+                resourceId: null,
+                req,
+                metadata: { identifier },
+            });
             throw new api_error_1.ApiError({
                 statusCode: 401,
                 code: "LOGIN_INVALID_CREDENTIALS",
@@ -69,6 +76,15 @@ class AuthService {
             });
         }
         if (user.status === "SUSPENDED" || user.status === "CLOSED") {
+            await (0, security_audit_1.recordSecurityAudit)({
+                actorType: "USER",
+                actorId: user.id,
+                action: "AUTH_LOGIN_BLOCKED",
+                resourceType: "AUTH_SESSION",
+                resourceId: null,
+                req,
+                metadata: { status: user.status },
+            });
             throw new api_error_1.ApiError({
                 statusCode: 403,
                 code: "ACCOUNT_UNAVAILABLE",
@@ -77,6 +93,15 @@ class AuthService {
         }
         const passwordOk = await argon2_1.default.verify(user.passwordHash, password);
         if (!passwordOk) {
+            await (0, security_audit_1.recordSecurityAudit)({
+                actorType: "USER",
+                actorId: user.id,
+                action: "AUTH_LOGIN_FAILED",
+                resourceType: "AUTH_SESSION",
+                resourceId: null,
+                req,
+                metadata: { identifier },
+            });
             throw new api_error_1.ApiError({
                 statusCode: 401,
                 code: "LOGIN_INVALID_CREDENTIALS",
@@ -97,6 +122,18 @@ class AuthService {
         });
         const cookieValue = (0, session_auth_1.buildSessionCookieValue)(session.id, secret);
         (0, session_auth_1.setSessionCookie)(res, cookieValue, expiresAt);
+        await (0, security_audit_1.recordSecurityAudit)({
+            actorType: "USER",
+            actorId: user.id,
+            action: "AUTH_LOGIN_SUCCEEDED",
+            resourceType: "AUTH_SESSION",
+            resourceId: session.id,
+            req,
+            metadata: {
+                sessionId: session.id,
+                expiresAtUtc: session.expiresAt.toISOString(),
+            },
+        });
         return {
             ok: true,
             user: {
@@ -164,19 +201,26 @@ class AuthService {
         };
     }
     async logout(req, res) {
+        const auth = await this.resolveAuthFromRequest(req);
         const parsed = (0, session_auth_1.parseSessionCookieValue)((0, session_auth_1.getCookieFromRequest)(req, session_auth_1.SESSION_COOKIE_NAME));
         if (parsed?.sessionId) {
             await prisma_1.prisma.session.updateMany({
-                where: {
-                    id: parsed.sessionId,
-                    revokedAt: null,
-                },
-                data: {
-                    revokedAt: new Date(),
-                },
+                where: { id: parsed.sessionId, revokedAt: null },
+                data: { revokedAt: new Date() },
             });
         }
         (0, session_auth_1.clearSessionCookie)(res);
+        await (0, security_audit_1.recordSecurityAudit)({
+            actorType: auth?.userId ? "USER" : "ANONYMOUS",
+            actorId: auth?.userId ?? null,
+            action: "AUTH_LOGOUT",
+            resourceType: "AUTH_SESSION",
+            resourceId: parsed?.sessionId ?? null,
+            req,
+            metadata: {
+                sessionId: parsed?.sessionId ?? null,
+            },
+        });
         return { ok: true };
     }
     async requestPasswordReset(body) {
@@ -188,7 +232,16 @@ class AuthService {
                 message: "Email is required.",
             });
         }
-        return verification_service_1.verificationService.requestPasswordReset(email);
+        const result = await verification_service_1.verificationService.requestPasswordReset(email);
+        await (0, security_audit_1.recordSecurityAudit)({
+            actorType: "ANONYMOUS",
+            actorId: null,
+            action: "AUTH_PASSWORD_RESET_REQUESTED",
+            resourceType: "PASSWORD_RESET",
+            resourceId: null,
+            metadata: { email },
+        });
+        return result;
     }
     async resetPassword(body) {
         const token = body?.token?.trim();
@@ -207,7 +260,16 @@ class AuthService {
                 message: "Password must be at least 10 characters long.",
             });
         }
-        return verification_service_1.verificationService.resetPassword(token, newPassword);
+        const result = await verification_service_1.verificationService.resetPassword(token, newPassword);
+        await (0, security_audit_1.recordSecurityAudit)({
+            actorType: "ANONYMOUS",
+            actorId: null,
+            action: "AUTH_PASSWORD_RESET_COMPLETED",
+            resourceType: "PASSWORD_RESET",
+            resourceId: null,
+            metadata: { tokenPresent: Boolean(token) },
+        });
+        return result;
     }
     async sendOtp(userId, body) {
         const channel = body?.channel || "EMAIL";
@@ -262,6 +324,17 @@ class AuthService {
                 expiresAt,
             },
         });
+        await (0, security_audit_1.recordSecurityAudit)({
+            actorType: "USER",
+            actorId: userId,
+            action: "AUTH_OTP_SENT",
+            resourceType: "OTP_CHALLENGE",
+            resourceId: null,
+            metadata: {
+                channel,
+                expiresAtUtc: expiresAt.toISOString(),
+            },
+        });
         return {
             ok: true,
             message: channel === "EMAIL"
@@ -301,7 +374,7 @@ class AuthService {
             });
         }
         const codeHash = this.hashVerificationCode(code);
-        if (codeHash !== record.codeHash) {
+        if (codeHash != record.codeHash) {
             throw new api_error_1.ApiError({
                 statusCode: 400,
                 code: "OTP_INVALID",
@@ -320,6 +393,14 @@ class AuthService {
                 data: { consumedAt: now },
             }),
         ]);
+        await (0, security_audit_1.recordSecurityAudit)({
+            actorType: "USER",
+            actorId: userId,
+            action: "AUTH_OTP_VERIFIED",
+            resourceType: "OTP_CHALLENGE",
+            resourceId: record.id,
+            metadata: { channel },
+        });
         return {
             ok: true,
             message: channel === "EMAIL" ? "Your email has been verified." : "Your phone number has been verified.",
@@ -347,7 +428,12 @@ class AuthService {
         const secretOk = await (0, session_auth_1.verifySessionSecret)(session.refreshTokenHash, parsed.secret);
         if (!secretOk)
             return null;
-        return { userId: session.userId, sessionId: session.id };
+        return {
+            userId: session.userId,
+            sessionId: session.id,
+            mfaMethod: session.mfaMethod ?? null,
+            mfaVerifiedAt: session.mfaVerifiedAt ?? null,
+        };
     }
     getRequestIp(req) {
         const xff = req.headers["x-forwarded-for"];

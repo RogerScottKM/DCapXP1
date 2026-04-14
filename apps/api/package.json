@@ -48,7 +48,11 @@
     "test:ledger:settlement": "vitest run -- ledger.reconciliation.test.ts",
     "test:ledger:execution": "vitest run -- ledger.execution.test.ts",
     "test:ledger:order-state": "vitest run -- ledger.order-state.test.ts",
-    "test:ledger:hold-release": "vitest run -- ledger.hold-release.test.ts"
+    "test:ledger:hold-release": "vitest run -- ledger.hold-release.test.ts",
+    "test:auth:session-utils": "vitest run test/session-auth.utils.test.ts",
+    "test:auth:session-resolution": "vitest run test/session.resolution.test.ts",
+    "test:auth:require-auth": "vitest run test/require-auth.comprehensive.test.ts",
+    "test:auth:mfa-service": "vitest run test/mfa.service.test.ts"
   },
   "type": "commonjs"
 }

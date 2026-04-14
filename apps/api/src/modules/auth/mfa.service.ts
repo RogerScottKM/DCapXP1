@@ -569,15 +569,17 @@ class MfaService {
   }
 
   private generateRecoveryCode(): string {
-    const raw = crypto
+  let raw = "";
+  while (raw.length < 12) {
+    raw += crypto
       .randomBytes(8)
       .toString("base64url")
       .replace(/[^A-Za-z0-9]/g, "")
-      .toUpperCase()
-      .slice(0, 12);
-
-    return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+      .toUpperCase();
   }
+  raw = raw.slice(0, 12);
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+}
 
   private hashRecoveryCode(code: string): string {
     const normalized = code.replace(/[^A-Za-z0-9]/g, "").toUpperCase();

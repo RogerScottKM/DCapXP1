@@ -52,7 +52,10 @@
     "test:auth:session-utils": "vitest run test/session-auth.utils.test.ts",
     "test:auth:session-resolution": "vitest run test/session.resolution.test.ts",
     "test:auth:require-auth": "vitest run test/require-auth.comprehensive.test.ts",
-    "test:auth:mfa-service": "vitest run test/mfa.service.test.ts"
+    "test:auth:mfa-service": "vitest run test/mfa.service.test.ts",
+    "test:auth:vault-bootstrap": "vitest run test/vault-bootstrap.test.ts",
+    "test:middleware:ibac": "vitest run test/ibac.middleware.test.ts",
+    "test:pass-b": "vitest run test/vault-bootstrap.test.ts test/ibac.middleware.test.ts"
   },
   "type": "commonjs"
 }

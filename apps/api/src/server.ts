@@ -1,10 +1,19 @@
 import "dotenv/config";
 import type { Server } from "http";
 import type { Express } from "express";
+
 import { bootstrapSecrets } from "./lib/bootstrap-secrets";
+import { prisma } from "./lib/prisma";
+import {
+  startReconciliationWorker,
+  stopReconciliationWorker,
+} from "./workers/reconciliation";
 
 const PORT = Number(process.env.API_PORT ?? process.env.PORT ?? 4010);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const RECON_INTERVAL_MS = Number(
+  process.env.RECONCILIATION_INTERVAL_MS ?? (IS_PRODUCTION ? 60_000 : 300_000),
+);
 
 let server: Server | null = null;
 let shuttingDown = false;
@@ -33,6 +42,8 @@ async function shutdown(signal: string): Promise<void> {
   }
   shuttingDown = true;
   console.log(`[server] received ${signal}, shutting down`);
+
+  stopReconciliationWorker();
 
   const closeServer = new Promise<void>((resolve) => {
     if (!server) {
@@ -66,16 +77,18 @@ async function main(): Promise<void> {
   validateEnv();
 
   const appModule = await import("./app.js");
-  const prismaModule = await import("./lib/prisma.js");
-
   const app = appModule.default as unknown as Express;
-  const prisma = prismaModule.prisma;
 
   prismaClient = prisma;
 
   server = app.listen(PORT, () => {
     console.log(`api listening on ${PORT}`);
   });
+
+  const reconEnabled = process.env.RECONCILIATION_ENABLED !== "false";
+  if (reconEnabled) {
+    startReconciliationWorker(RECON_INTERVAL_MS);
+  }
 }
 
 void main().catch((error) => {

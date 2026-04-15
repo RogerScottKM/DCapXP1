@@ -16,6 +16,7 @@ import {
   reserveOrderOnPlacement,
   settleMatchedTrade,
 } from "../lib/ledger";
+import { canCancel, ORDER_STATUS } from "../lib/ledger/order-state";
 import { enforceMandate, bumpOrdersPlaced } from "../middleware/ibac";
 
 const router = Router();
@@ -125,8 +126,15 @@ router.post("/orders/:orderId/cancel", enforceMandate("TRADE"), async (req: any,
     }
 
     const remainingQty = await getOrderRemainingQty(order, prisma);
-    if (remainingQty.lessThanOrEqualTo(0) || order.status !== "OPEN") {
-      return res.status(409).json({ error: "Only OPEN orders with remaining quantity can be cancelled" });
+
+    if (!canCancel(order.status)) {
+      return res.status(409).json({
+        error: `Cannot cancel order in status ${order.status}.`,
+      });
+    }
+
+    if (remainingQty.lessThanOrEqualTo(0)) {
+      return res.status(409).json({ error: "Order has no remaining quantity to cancel." });
     }
 
     const [ledgerRelease, cancelledOrder] = await prisma.$transaction(async (tx) => {
@@ -146,7 +154,7 @@ router.post("/orders/:orderId/cancel", enforceMandate("TRADE"), async (req: any,
 
       const updated = await tx.order.update({
         where: { id: order.id },
-        data: { status: "CANCELLED" },
+        data: { status: ORDER_STATUS.CANCELLED },
       });
 
       return [release, updated] as const;

@@ -58,7 +58,8 @@
     "test:pass-b": "vitest run test/vault-bootstrap.test.ts test/ibac.middleware.test.ts",
     "test:ledger:phase2-smoke": "vitest run test/ledger.phase2.smoke.test.ts",
     "test:ledger:phase2": "vitest run test/ledger.reconciliation.test.ts test/ledger.execution.test.ts test/ledger.order-state.test.ts test/ledger.hold-release.test.ts test/ledger.phase2.smoke.test.ts",
-    "test:routes:trade-cancel": "vitest run test/trade.cancel.guard.test.ts"
+    "test:routes:trade-cancel": "vitest run test/trade.cancel.guard.test.ts",
+    "test:routes:orders": "vitest run test/orders.routes.test.ts"
   },
   "type": "commonjs"
 }

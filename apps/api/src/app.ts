@@ -18,7 +18,7 @@ import agentsRoutes from "./routes/agents";
 import mandatesRoutes from "./routes/mandates";
 import marketRoutes from "./routes/market";
 import streamRoutes from "./routes/stream";
-import tradeRoutes from "./routes/trade";
+import tradeRoutes from "./routes/trade"; import ordersRoutes from "./routes/orders";
 
 const app = express();
 
@@ -122,7 +122,7 @@ for (const prefix of ["", "/v1/stream", "/api/v1/stream"]) {
   app.use(prefix, streamRoutes);
 }
 
-app.use((req, res) => {
+for (const prefix of ["/api/orders"]) { app.use(prefix, ordersRoutes); } app.use((req, res) => {
   const requestId = (req as any).requestId;
   res.status(404).json({
     error: {

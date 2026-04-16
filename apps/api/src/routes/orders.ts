@@ -13,6 +13,7 @@ import {
   reserveOrderOnPlacement,
 } from "../lib/ledger";
 import { canCancel, ORDER_STATUS } from "../lib/ledger/order-state";
+import { normalizeTimeInForce } from "../lib/ledger/time-in-force";
 import { withIdempotency } from "../lib/idempotency";
 import { requireAuth, requireRecentMfa, requireLiveModeEligible } from "../middleware/require-auth";
 import { auditPrivilegedRequest } from "../middleware/audit-privileged";
@@ -46,6 +47,7 @@ const placeOrderSchema = z.object({
   ),
   mode: z.enum(["PAPER", "LIVE"]).optional().default("PAPER"),
   quoteFeeBps: z.string().optional().default("0"),
+  timeInForce: z.enum(["GTC", "IOC", "FOK", "POST_ONLY"]).optional().default("GTC"),
 });
 
 router.use(requireAuth);
@@ -85,6 +87,7 @@ router.get("/", async (req, res) => {
         qty: o.qty.toString(),
         status: o.status,
         mode: o.mode,
+        timeInForce: o.timeInForce,
         createdAt: o.createdAt.toISOString(),
       })),
     });
@@ -103,6 +106,7 @@ router.post(
     try {
       const userId = req.auth!.userId;
       const payload = placeOrderSchema.parse(req.body);
+      const normalizedTimeInForce = normalizeTimeInForce(payload.timeInForce);
 
       const market = await prisma.market.findUnique({
         where: { symbol: payload.symbol },
@@ -119,6 +123,7 @@ router.post(
             price: new Prisma.Decimal(payload.price),
             qty: new Prisma.Decimal(payload.qty),
             status: "OPEN",
+            timeInForce: normalizedTimeInForce as any,
             mode: payload.mode as TradeMode,
             userId,
           },
@@ -156,6 +161,7 @@ router.post(
             qty: execution.order.qty.toString(),
             status: execution.order.status,
             mode: execution.order.mode,
+            timeInForce: execution.order.timeInForce ?? normalizedTimeInForce,
             createdAt: execution.order.createdAt.toISOString(),
           },
           fills: execution.fills.length,
@@ -239,6 +245,7 @@ router.post(
           qty: result.order.qty.toString(),
           status: result.order.status,
           mode: result.order.mode,
+          timeInForce: result.order.timeInForce,
         },
         releasedQty: remainingQty.toString(),
       });
@@ -286,6 +293,7 @@ router.get("/:orderId", async (req, res) => {
         qty: order.qty.toString(),
         status: order.status,
         mode: order.mode,
+        timeInForce: order.timeInForce,
         createdAt: order.createdAt.toISOString(),
         remainingQty: remainingQty.toString(),
       },

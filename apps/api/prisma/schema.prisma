@@ -413,6 +413,7 @@ model Order {
 
   @@index([symbol, mode, side, status, price, createdAt])
   @@index([userId, createdAt])
+  timeInForce TimeInForce @default(GTC)
 }
 
 model Trade {
@@ -1427,4 +1428,11 @@ model IdempotencyKey {
 
   @@unique([ownerType, ownerId, scope, key])
   @@index([scope, key])
+}
+
+enum TimeInForce {
+  GTC
+  IOC
+  FOK
+  POST_ONLY
 }

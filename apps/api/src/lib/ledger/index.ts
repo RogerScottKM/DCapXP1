@@ -16,3 +16,4 @@ export {
   computeRemainingQtyFromCumulative,
   assertCumulativeFillWithinOrder,
 } from "./hold-release";
+export * from "./matching-priority";

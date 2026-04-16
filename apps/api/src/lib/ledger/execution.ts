@@ -13,6 +13,7 @@ import { settleMatchedTrade } from "./order-lifecycle";
 import { assertExecutedQtyWithinOrder, computeRemainingQty, deriveOrderStatus } from "./order-state";
 import { reconcileTradeSettlement } from "./reconciliation";
 import { postLedgerTransaction } from "./service";
+import { buildMakerOrderByForTaker } from "./matching-priority";
 import { computeBuyHeldQuoteRelease, assertCumulativeFillWithinOrder } from "./hold-release";
 
 type LedgerDbClient = PrismaClient | Prisma.TransactionClient;
@@ -196,10 +197,7 @@ async function getMatchingOrders(order: Order, db: LedgerDbClient): Promise<Orde
       side: oppositeSide,
       NOT: { id: order.id },
     },
-    orderBy:
-      order.side === "BUY"
-        ? [{ price: "asc" }, { createdAt: "asc" }]
-        : [{ price: "desc" }, { createdAt: "asc" }],
+    orderBy: buildMakerOrderByForTaker(order.side),
   });
 
   return candidates.filter((candidate) => isCrossingLimitOrder(order.side, order.price, candidate.price));

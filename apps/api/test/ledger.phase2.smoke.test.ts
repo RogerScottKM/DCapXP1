@@ -21,7 +21,7 @@ import {
 } from "../src/lib/ledger/order-state";
 
 describe("ledger phase2 smoke", () => {
-  it("models reserve to partial fill under current persisted status semantics", () => {
+  it("models reserve to partial fill under expanded order-state semantics", () => {
     const reservedQuote = computeReservedQuote("10", "100");
     const firstFillQuote = computeExecutedQuote("4", "99");
     const remainingQty = computeRemainingQty("10", "4");
@@ -33,9 +33,9 @@ describe("ledger phase2 smoke", () => {
     expect(remainingQty.toString()).toBe("6");
     expect(isFullyFilled("10", "4")).toBe(false);
 
-    // Phase 2G stays aligned to the current persisted enum semantics:
-    // partial fills still reconcile to OPEN until the later enum expansion.
-    expect(expectedStatus).toBe("OPEN");
+    // After Phase 2H order-status expansion, partial fills now reconcile
+    // to PARTIALLY_FILLED instead of staying OPEN.
+    expect(expectedStatus).toBe("PARTIALLY_FILLED");
     expect(quoteFee.toString()).toBe("0.99");
   });
 

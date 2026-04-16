@@ -192,7 +192,7 @@ async function getMatchingOrders(order: Order, db: LedgerDbClient): Promise<Orde
     where: {
       symbol: order.symbol,
       mode: order.mode,
-      status: "OPEN",
+      status: { in: ["OPEN", "PARTIALLY_FILLED"] },
       side: oppositeSide,
       NOT: { id: order.id },
     },

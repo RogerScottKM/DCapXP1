@@ -1410,3 +1410,21 @@ model LedgerPosting {
   @@index([assetCode, createdAt])
 }
 
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  ownerType      String
+  ownerId        String
+  scope          String
+  key            String
+  requestHash    String
+  method         String
+  path           String
+  state          String   @default("PENDING")
+  responseStatus Int?
+  responseBody   Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([ownerType, ownerId, scope, key])
+  @@index([scope, key])
+}

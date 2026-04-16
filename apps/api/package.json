@@ -61,7 +61,8 @@
     "test:routes:trade-cancel": "vitest run test/trade.cancel.guard.test.ts",
     "test:routes:orders": "vitest run test/orders.routes.test.ts",
     "test:routes:reconciliation": "vitest run test/reconciliation.routes.test.ts",
-    "test:workers:reconciliation": "vitest run test/reconciliation.worker.test.ts"
+    "test:workers:reconciliation": "vitest run test/reconciliation.worker.test.ts",
+    "test:lib:idempotency": "vitest run test/idempotency.lib.test.ts"
   },
   "type": "commonjs"
 }

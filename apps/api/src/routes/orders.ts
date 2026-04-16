@@ -13,6 +13,7 @@ import {
   reserveOrderOnPlacement,
 } from "../lib/ledger";
 import { canCancel, ORDER_STATUS } from "../lib/ledger/order-state";
+import { withIdempotency } from "../lib/idempotency";
 import { requireAuth, requireRecentMfa, requireLiveModeEligible } from "../middleware/require-auth";
 import { auditPrivilegedRequest } from "../middleware/audit-privileged";
 import { simpleRateLimit } from "../middleware/simple-rate-limit";
@@ -98,7 +99,7 @@ router.post(
   requireLiveModeEligible(),
   orderLimiter,
   auditPrivilegedRequest("ORDER_PLACE_REQUESTED", "ORDER"),
-  async (req, res) => {
+  withIdempotency("HUMAN_ORDER_PLACE", async (req, res) => {
     try {
       const userId = req.auth!.userId;
       const payload = placeOrderSchema.parse(req.body);
@@ -171,7 +172,7 @@ router.post(
       }
       return res.status(400).json({ error: message });
     }
-  },
+  }),
 );
 
 router.post(
@@ -181,7 +182,7 @@ router.post(
   auditPrivilegedRequest("ORDER_CANCEL_REQUESTED", "ORDER", (req) =>
     String(req.params.orderId),
   ),
-  async (req, res) => {
+  withIdempotency("HUMAN_ORDER_CANCEL", async (req, res) => {
     try {
       const userId = req.auth!.userId;
       const orderId = BigInt(String(req.params.orderId));
@@ -244,7 +245,7 @@ router.post(
     } catch (error: any) {
       return res.status(400).json({ error: error?.message ?? "Unable to cancel order" });
     }
-  },
+  }),
 );
 
 router.get("/:orderId", async (req, res) => {

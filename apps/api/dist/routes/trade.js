@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const prisma_1 = require("../lib/prisma");
 const ledger_1 = require("../lib/ledger");
+const order_state_1 = require("../lib/ledger/order-state");
 const ibac_1 = require("../middleware/ibac");
 const router = (0, express_1.Router)();
 const orderSchema = zod_1.z.object({
@@ -91,8 +92,13 @@ router.post("/orders/:orderId/cancel", (0, ibac_1.enforceMandate)("TRADE"), asyn
             return res.status(404).json({ error: "Order not found" });
         }
         const remainingQty = await (0, ledger_1.getOrderRemainingQty)(order, prisma_1.prisma);
-        if (remainingQty.lessThanOrEqualTo(0) || order.status !== "OPEN") {
-            return res.status(409).json({ error: "Only OPEN orders with remaining quantity can be cancelled" });
+        if (!(0, order_state_1.canCancel)(order.status)) {
+            return res.status(409).json({
+                error: `Cannot cancel order in status ${order.status}.`,
+            });
+        }
+        if (remainingQty.lessThanOrEqualTo(0)) {
+            return res.status(409).json({ error: "Order has no remaining quantity to cancel." });
         }
         const [ledgerRelease, cancelledOrder] = await prisma_1.prisma.$transaction(async (tx) => {
             const release = await (0, ledger_1.releaseOrderOnCancel)({
@@ -107,7 +113,7 @@ router.post("/orders/:orderId/cancel", (0, ibac_1.enforceMandate)("TRADE"), asyn
             }, tx);
             const updated = await tx.order.update({
                 where: { id: order.id },
-                data: { status: "CANCELLED" },
+                data: { status: order_state_1.ORDER_STATUS.CANCELLED },
             });
             return [release, updated];
         });

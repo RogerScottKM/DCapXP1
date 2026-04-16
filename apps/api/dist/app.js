@@ -23,6 +23,8 @@ const mandates_1 = __importDefault(require("./routes/mandates"));
 const market_1 = __importDefault(require("./routes/market"));
 const stream_1 = __importDefault(require("./routes/stream"));
 const trade_1 = __importDefault(require("./routes/trade"));
+const reconciliation_1 = __importDefault(require("./routes/reconciliation"));
+const orders_1 = __importDefault(require("./routes/orders"));
 const app = (0, express_1.default)();
 const corsOrigins = (process.env.APP_CORS_ORIGINS ?? "http://localhost:3000")
     .split(",")
@@ -101,6 +103,12 @@ for (const prefix of ["", "/v1/trade", "/api/v1/trade"]) {
 }
 for (const prefix of ["", "/v1/stream", "/api/v1/stream"]) {
     app.use(prefix, stream_1.default);
+}
+for (const prefix of ["/api/orders"]) {
+    app.use(prefix, orders_1.default);
+}
+for (const prefix of ["/api/admin/reconciliation"]) {
+    app.use(prefix, reconciliation_1.default);
 }
 app.use((req, res) => {
     const requestId = req.requestId;

@@ -465,12 +465,15 @@ class MfaService {
         return crypto_1.default.createHash("sha256").update(raw).digest();
     }
     generateRecoveryCode() {
-        const raw = crypto_1.default
-            .randomBytes(8)
-            .toString("base64url")
-            .replace(/[^A-Za-z0-9]/g, "")
-            .toUpperCase()
-            .slice(0, 12);
+        let raw = "";
+        while (raw.length < 12) {
+            raw += crypto_1.default
+                .randomBytes(8)
+                .toString("base64url")
+                .replace(/[^A-Za-z0-9]/g, "")
+                .toUpperCase();
+        }
+        raw = raw.slice(0, 12);
         return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
     }
     hashRecoveryCode(code) {

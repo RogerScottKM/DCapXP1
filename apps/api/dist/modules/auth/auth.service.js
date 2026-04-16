@@ -419,13 +419,21 @@ class AuthService {
         });
         if (!session)
             return null;
+        if (!session.user)
+            return null;
         if (session.revokedAt)
             return null;
         if (session.expiresAt.getTime() <= Date.now())
             return null;
         if (session.user.status === "SUSPENDED" || session.user.status === "CLOSED")
             return null;
-        const secretOk = await (0, session_auth_1.verifySessionSecret)(session.refreshTokenHash, parsed.secret);
+        let secretOk = false;
+        try {
+            secretOk = await (0, session_auth_1.verifySessionSecret)(session.refreshTokenHash, parsed.secret);
+        }
+        catch {
+            return null;
+        }
         if (!secretOk)
             return null;
         return {

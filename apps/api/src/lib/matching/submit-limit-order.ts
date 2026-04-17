@@ -4,10 +4,10 @@ import { prisma } from "../prisma";
 import { reserveOrderOnPlacement } from "../ledger";
 import { normalizeTimeInForce } from "../ledger/time-in-force";
 import { ORDER_STATUS } from "../ledger/order-state";
-import { dbMatchingEngine } from "./db-matching-engine";
+import type { MatchingEnginePort } from "./engine-port";
 import { selectMatchingEngine } from "./select-engine";
 import { buildSymbolModeKey, runSerializedByKey } from "./serialized-dispatch";
-import type { MatchingEnginePort } from "./engine-port";
+import { buildMatchingEventsFromSubmission, emitMatchingEvents } from "./matching-events";
 
 export type SubmitLimitOrderInput = {
   userId: string;
@@ -58,51 +58,30 @@ export async function submitLimitOrder(
     );
 
     const executeThroughSelectedEngine = () =>
-
-
       selectedEngine.executeLimitOrder(
-
-
         {
-
-
           orderId: order.id,
-
-
           quoteFeeBps: input.quoteFeeBps ?? "0",
-
-
         },
-
-
         tx,
-
-
       );
 
-
-    
-
-
     const engineResult =
-
-
       selectedEngine.name === "IN_MEMORY_MATCHER"
-
-
         ? await runSerializedByKey(
-
-
             buildSymbolModeKey(input.symbol, String(input.mode)),
-
-
             executeThroughSelectedEngine,
-
-
           )
-
-
         : await executeThroughSelectedEngine();
+
+    const events = buildMatchingEventsFromSubmission({
+      order,
+      execution: engineResult.execution,
+      engine: engineResult.engine,
+      source: input.source,
+      timeInForce: normalizedTimeInForce,
+    });
+    emitMatchingEvents(events);
 
     return {
       order,
@@ -112,6 +91,7 @@ export async function submitLimitOrder(
       engine: engineResult.engine,
       source: input.source,
       timeInForce: normalizedTimeInForce,
+      events,
     };
   });
 }

@@ -36,6 +36,16 @@ export type InMemoryFill = {
   price: string;
 };
 
+export type InMemoryBookDelta = {
+  symbol: string;
+  bestBid: string | null;
+  bestAsk: string | null;
+  bidDepth: string;
+  askDepth: string;
+  bidOrders: number;
+  askOrders: number;
+};
+
 export class InMemoryOrderBook {
   private readonly bids: InMemoryBookOrder[] = [];
   private readonly asks: InMemoryBookOrder[] = [];
@@ -97,6 +107,43 @@ export class InMemoryOrderBook {
     return total;
   }
 
+  private summarizeSide(sideOrders: InMemoryBookOrder[]): {
+    bestPrice: string | null;
+    depth: string;
+    count: number;
+  } {
+    const active = sideOrders.filter((o) => o.remainingQty.greaterThan(0));
+    if (!active.length) {
+      return { bestPrice: null, depth: "0", count: 0 };
+    }
+
+    const total = active.reduce((acc, order) => acc.plus(order.remainingQty), new Decimal(0));
+    const best = active[0]?.price ?? null;
+    return {
+      bestPrice: best ? best.toString() : null,
+      depth: total.toString(),
+      count: active.length,
+    };
+  }
+
+  getBookDelta(symbol: string): InMemoryBookDelta {
+    const sortedBids = sortMakersForTaker("SELL", this.bids);
+    const sortedAsks = sortMakersForTaker("BUY", this.asks);
+
+    const bidSummary = this.summarizeSide(sortedBids);
+    const askSummary = this.summarizeSide(sortedAsks);
+
+    return {
+      symbol,
+      bestBid: bidSummary.bestPrice,
+      bestAsk: askSummary.bestPrice,
+      bidDepth: bidSummary.depth,
+      askDepth: askSummary.depth,
+      bidOrders: bidSummary.count,
+      askOrders: askSummary.count,
+    };
+  }
+
   matchIncoming(input: {
     orderId: string;
     symbol: string;
@@ -110,6 +157,7 @@ export class InMemoryOrderBook {
     remainingQty: string;
     tifAction: "KEEP_OPEN" | "CANCEL_REMAINDER" | "FILLED";
     restingOrderId: string | null;
+    bookDelta: InMemoryBookDelta;
   } {
     const tif = normalizeTimeInForce(input.timeInForce);
     const takerPrice = toDecimal(input.price);
@@ -185,6 +233,7 @@ export class InMemoryOrderBook {
       remainingQty: remaining.toString(),
       tifAction,
       restingOrderId,
+      bookDelta: this.getBookDelta(input.symbol),
     };
   }
 }

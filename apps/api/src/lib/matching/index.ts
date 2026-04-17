@@ -5,3 +5,4 @@ export * from "./in-memory-order-book";
 export * from "./in-memory-matching-engine";
 export * from "./select-engine";
 export * from "./serialized-dispatch";
+export * from "./matching-events";

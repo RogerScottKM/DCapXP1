@@ -194,6 +194,7 @@ export class InMemoryMatchingEngine implements MatchingEnginePort {
         tifAction: bookExecution.tifAction,
         restingOrderId: bookExecution.restingOrderId,
         settlements: settlementResults,
+        bookDelta: bookExecution.bookDelta,
       },
       orderReconciliation,
       engine: this.name,

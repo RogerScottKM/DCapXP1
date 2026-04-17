@@ -66,7 +66,8 @@
     "test:lib:time-in-force": "vitest run test/time-in-force.lib.test.ts",
     "test:ledger:matching-determinism": "vitest run test/ledger.matching-determinism.test.ts",
     "test:ledger:execution-cleanup": "vitest run test/ledger.execution.phase3-cleanup.test.ts",
-    "test:matching:submission": "vitest run test/order-submission-unification.test.ts"
+    "test:matching:submission": "vitest run test/order-submission-unification.test.ts",
+    "test:matching:in-memory": "vitest run test/in-memory-matching-engine.test.ts"
   },
   "type": "commonjs"
 }

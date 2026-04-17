@@ -1,3 +1,6 @@
 export * from "./engine-port";
 export * from "./db-matching-engine";
 export * from "./submit-limit-order";
+export * from "./in-memory-order-book";
+export * from "./in-memory-matching-engine";
+export * from "./select-engine";

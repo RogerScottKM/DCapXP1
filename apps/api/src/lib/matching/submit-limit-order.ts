@@ -5,6 +5,7 @@ import { reserveOrderOnPlacement } from "../ledger";
 import { normalizeTimeInForce } from "../ledger/time-in-force";
 import { ORDER_STATUS } from "../ledger/order-state";
 import { dbMatchingEngine } from "./db-matching-engine";
+import { selectMatchingEngine } from "./select-engine";
 import type { MatchingEnginePort } from "./engine-port";
 
 export type SubmitLimitOrderInput = {
@@ -22,9 +23,10 @@ export type SubmitLimitOrderInput = {
 export async function submitLimitOrder(
   input: SubmitLimitOrderInput,
   db: PrismaClient = prisma,
-  engine: MatchingEnginePort = dbMatchingEngine,
+  engine?: MatchingEnginePort,
 ) {
   const normalizedTimeInForce = normalizeTimeInForce(input.timeInForce);
+  const selectedEngine = engine ?? selectMatchingEngine();
 
   return db.$transaction(async (tx) => {
     const order = await tx.order.create({
@@ -53,7 +55,7 @@ export async function submitLimitOrder(
       tx,
     );
 
-    const engineResult = await engine.executeLimitOrder(
+    const engineResult = await selectedEngine.executeLimitOrder(
       {
         orderId: order.id,
         quoteFeeBps: input.quoteFeeBps ?? "0",

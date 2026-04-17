@@ -6,6 +6,7 @@ import { normalizeTimeInForce } from "../ledger/time-in-force";
 import { ORDER_STATUS } from "../ledger/order-state";
 import { dbMatchingEngine } from "./db-matching-engine";
 import { selectMatchingEngine } from "./select-engine";
+import { buildSymbolModeKey, runSerializedByKey } from "./serialized-dispatch";
 import type { MatchingEnginePort } from "./engine-port";
 
 export type SubmitLimitOrderInput = {
@@ -56,13 +57,52 @@ export async function submitLimitOrder(
       tx,
     );
 
-    const engineResult = await selectedEngine.executeLimitOrder(
-      {
-        orderId: order.id,
-        quoteFeeBps: input.quoteFeeBps ?? "0",
-      },
-      tx,
-    );
+    const executeThroughSelectedEngine = () =>
+
+
+      selectedEngine.executeLimitOrder(
+
+
+        {
+
+
+          orderId: order.id,
+
+
+          quoteFeeBps: input.quoteFeeBps ?? "0",
+
+
+        },
+
+
+        tx,
+
+
+      );
+
+
+    
+
+
+    const engineResult =
+
+
+      selectedEngine.name === "IN_MEMORY_MATCHER"
+
+
+        ? await runSerializedByKey(
+
+
+            buildSymbolModeKey(input.symbol, String(input.mode)),
+
+
+            executeThroughSelectedEngine,
+
+
+          )
+
+
+        : await executeThroughSelectedEngine();
 
     return {
       order,

@@ -4,6 +4,7 @@ import { TradeMode, Prisma } from "@prisma/client";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
+import { submitLimitOrder } from "../lib/matching/submit-limit-order";
 import {
   executeLimitOrderAgainstBook,
   getOrderRemainingQty,
@@ -63,49 +64,24 @@ router.post("/orders", enforceMandate("TRADE"), async (req: any, res) => {
       return res.status(400).json({ error: "LIMIT orders require price." });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const order = await tx.order.create({
-        data: {
-          symbol: payload.symbol,
-          side: payload.side,
-          price: new Prisma.Decimal(payload.price!),
-          qty: new Prisma.Decimal(payload.qty),
-          status: "OPEN",
-          mode: payload.mode as TradeMode,
-          userId: principal.userId,
-        },
-      });
-
-      const ledgerReservation = await reserveOrderOnPlacement(
+    const result = await submitLimitOrder(
         {
-          orderId: order.id,
           userId: principal.userId,
           symbol: payload.symbol,
           side: payload.side,
-          qty: payload.qty,
           price: payload.price!,
+          qty: payload.qty,
           mode: payload.mode as TradeMode,
-        },
-        tx,
-      );
-
-      const execution = await executeLimitOrderAgainstBook(
-        {
-          orderId: order.id,
           quoteFeeBps: payload.quoteFeeBps ?? "0",
+          timeInForce: payload.tif ?? "GTC",
+          source: "AGENT",
         },
-        tx,
+        prisma,
       );
 
-      const orderReconciliation = await reconcileOrderExecution(order.id, tx);
-      const cumulativeFillCheck = await reconcileCumulativeFills(order.id, tx);
+      await bumpOrdersPlaced(principal.mandateId ?? principal.mandate?.id);
 
-      return { order, ledgerReservation, execution, orderReconciliation, cumulativeFillCheck };
-    });
-
-    await bumpOrdersPlaced(principal.mandateId ?? principal.mandate?.id);
-
-    return res.json({ ok: true, ...result });
+      return res.json({ ok: true, ...result });
   } catch (error: any) {
     return res.status(400).json({ error: error?.message ?? "Unable to place order" });
   }

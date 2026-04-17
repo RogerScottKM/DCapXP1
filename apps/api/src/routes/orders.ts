@@ -5,6 +5,7 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { z } from "zod";
 
 import { prisma } from "../lib/prisma";
+import { submitLimitOrder } from "../lib/matching/submit-limit-order";
 import {
   executeLimitOrderAgainstBook,
   getOrderRemainingQty,
@@ -115,60 +116,20 @@ router.post(
         return res.status(400).json({ error: `Market ${payload.symbol} not found.` });
       }
 
-      const result = await prisma.$transaction(async (tx) => {
-        const order = await tx.order.create({
-          data: {
-            symbol: payload.symbol,
-            side: payload.side,
-            price: new Prisma.Decimal(payload.price),
-            qty: new Prisma.Decimal(payload.qty),
-            status: "OPEN",
-            timeInForce: normalizedTimeInForce as any,
-            mode: payload.mode as TradeMode,
-            userId,
-          },
-        });
-
-        await reserveOrderOnPlacement(
-          {
-            orderId: order.id,
-            userId,
-            symbol: payload.symbol,
-            side: payload.side,
-            qty: payload.qty,
-            price: payload.price,
-            mode: payload.mode as TradeMode,
-          },
-          tx,
-        );
-
-        const execution = await executeLimitOrderAgainstBook(
-          {
-            orderId: order.id,
-            quoteFeeBps: payload.quoteFeeBps,
-          },
-          tx,
-        );
-
-        const reconciliation = await reconcileOrderExecution(order.id, tx);
-
-        return {
-          order: {
-            id: execution.order.id.toString(),
-            symbol: execution.order.symbol,
-            side: execution.order.side,
-            price: execution.order.price.toString(),
-            qty: execution.order.qty.toString(),
-            status: execution.order.status,
-            mode: execution.order.mode,
-            timeInForce: execution.order.timeInForce ?? normalizedTimeInForce,
-            createdAt: execution.order.createdAt.toISOString(),
-          },
-          fills: execution.fills.length,
-          remainingQty: execution.remainingQty,
-          reconciliation,
-        };
-      });
+      const result = await submitLimitOrder(
+        {
+          userId,
+          symbol: payload.symbol,
+          side: payload.side,
+          price: payload.price,
+          qty: payload.qty,
+          mode: payload.mode as TradeMode,
+          quoteFeeBps: payload.quoteFeeBps ?? "0",
+          timeInForce: typeof payload.timeInForce === "string" ? payload.timeInForce : "GTC",
+          source: "HUMAN",
+        },
+        prisma,
+      );
 
       return res.status(201).json({ ok: true, ...result });
     } catch (error: any) {

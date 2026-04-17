@@ -107,6 +107,9 @@ router.post(
     try {
       const userId = req.auth!.userId;
       const payload = placeOrderSchema.parse(req.body);
+      const preferredEngine = process.env.ALLOW_IN_MEMORY_MATCHING === "true"
+        ? (req.get("x-matching-engine") ?? undefined)
+        : undefined;
       const normalizedTimeInForce = normalizeTimeInForce(payload.timeInForce);
 
       const market = await prisma.market.findUnique({
@@ -127,6 +130,7 @@ router.post(
           quoteFeeBps: payload.quoteFeeBps ?? "0",
           timeInForce: typeof payload.timeInForce === "string" ? payload.timeInForce : "GTC",
           source: "HUMAN",
+          preferredEngine,
         },
         prisma,
       );

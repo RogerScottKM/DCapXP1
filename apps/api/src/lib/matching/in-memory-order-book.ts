@@ -2,7 +2,12 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { type OrderSide } from "@prisma/client";
 
 import { sortMakersForTaker } from "../ledger/matching-priority";
-import { deriveTifRestingAction, normalizeTimeInForce } from "../ledger/time-in-force";
+import {
+  assertFokCanFullyFill,
+  assertPostOnlyWouldRest,
+  deriveTifRestingAction,
+  normalizeTimeInForce,
+} from "../ledger/time-in-force";
 
 type Decimalish = string | number | Decimal;
 
@@ -65,6 +70,33 @@ export class InMemoryOrderBook {
     return source.map((o) => ({ ...o }));
   }
 
+  private oppositeFor(side: OrderSide): InMemoryBookOrder[] {
+    return side === "BUY" ? this.asks : this.bids;
+  }
+
+  getBestOppositePrice(side: OrderSide): Decimal | null {
+    const sortedOpposite = sortMakersForTaker(side, this.oppositeFor(side));
+    return sortedOpposite[0]?.price ?? null;
+  }
+
+  getCrossingLiquidity(side: OrderSide, takerPrice: Decimalish): Decimal {
+    const price = toDecimal(takerPrice);
+    let total = new Decimal(0);
+
+    for (const maker of sortMakersForTaker(side, this.oppositeFor(side))) {
+      const crosses =
+        side === "BUY"
+          ? maker.price.lessThanOrEqualTo(price)
+          : maker.price.greaterThanOrEqualTo(price);
+
+      if (!crosses) break;
+      if (maker.remainingQty.lessThanOrEqualTo(0)) continue;
+      total = total.plus(maker.remainingQty);
+    }
+
+    return total;
+  }
+
   matchIncoming(input: {
     orderId: string;
     symbol: string;
@@ -81,12 +113,22 @@ export class InMemoryOrderBook {
   } {
     const tif = normalizeTimeInForce(input.timeInForce);
     const takerPrice = toDecimal(input.price);
-    let remaining = toDecimal(input.qty);
+    const initialQty = toDecimal(input.qty);
+    let remaining = initialQty;
 
-    const opposite = input.side === "BUY" ? this.asks : this.bids;
-    const sortedOpposite = sortMakersForTaker(input.side, opposite);
+    const bestOppositePrice = this.getBestOppositePrice(input.side);
+
+    if (tif === "POST_ONLY") {
+      assertPostOnlyWouldRest(input.side, takerPrice, bestOppositePrice);
+    }
+
+    if (tif === "FOK") {
+      const fillableLiquidity = this.getCrossingLiquidity(input.side, takerPrice);
+      assertFokCanFullyFill(initialQty, fillableLiquidity);
+    }
 
     const fills: InMemoryFill[] = [];
+    const sortedOpposite = sortMakersForTaker(input.side, this.oppositeFor(input.side));
 
     for (const maker of sortedOpposite) {
       if (remaining.lessThanOrEqualTo(0)) break;
@@ -115,12 +157,14 @@ export class InMemoryOrderBook {
       } else {
         const bookSide = maker.side === "BUY" ? this.bids : this.asks;
         const idx = bookSide.findIndex((o) => o.orderId === maker.orderId);
-        if (idx >= 0) bookSide[idx] = maker;
+        if (idx >= 0) {
+          bookSide[idx] = maker;
+        }
       }
     }
 
-    const executedQty = toDecimal(input.qty).minus(remaining);
-    const tifAction = deriveTifRestingAction(tif, executedQty, input.qty);
+    const executedQty = initialQty.minus(remaining);
+    const tifAction = deriveTifRestingAction(tif, executedQty, initialQty);
 
     let restingOrderId: string | null = null;
     if (tifAction === "KEEP_OPEN" && remaining.greaterThan(0)) {

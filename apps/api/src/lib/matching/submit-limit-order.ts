@@ -18,6 +18,7 @@ export type SubmitLimitOrderInput = {
   quoteFeeBps?: string;
   timeInForce?: string;
   source: "HUMAN" | "AGENT";
+  preferredEngine?: string | null;
 };
 
 export async function submitLimitOrder(
@@ -26,7 +27,7 @@ export async function submitLimitOrder(
   engine?: MatchingEnginePort,
 ) {
   const normalizedTimeInForce = normalizeTimeInForce(input.timeInForce);
-  const selectedEngine = engine ?? selectMatchingEngine();
+  const selectedEngine = engine ?? selectMatchingEngine(input.preferredEngine as any);
 
   return db.$transaction(async (tx) => {
     const order = await tx.order.create({

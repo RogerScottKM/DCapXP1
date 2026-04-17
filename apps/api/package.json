@@ -67,7 +67,8 @@
     "test:ledger:matching-determinism": "vitest run test/ledger.matching-determinism.test.ts",
     "test:ledger:execution-cleanup": "vitest run test/ledger.execution.phase3-cleanup.test.ts",
     "test:matching:submission": "vitest run test/order-submission-unification.test.ts",
-    "test:matching:in-memory": "vitest run test/in-memory-matching-engine.test.ts"
+    "test:matching:in-memory": "vitest run test/in-memory-matching-engine.test.ts",
+    "test:matching:in-memory-settlement": "vitest run test/in-memory-settlement-integration.test.ts"
   },
   "type": "commonjs"
 }

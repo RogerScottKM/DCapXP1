@@ -46,6 +46,9 @@ const fillSchema = z.object({
 router.post("/orders", enforceMandate("TRADE"), async (req: any, res) => {
   try {
     const payload = orderSchema.parse(req.body);
+      const preferredEngine = process.env.ALLOW_IN_MEMORY_MATCHING === "true"
+        ? (req.get("x-matching-engine") ?? undefined)
+        : undefined;
     const limitPrice = payload.price;
     if (!limitPrice) {
       return res.status(400).json({ error: "LIMIT orders require price." });
@@ -75,6 +78,7 @@ router.post("/orders", enforceMandate("TRADE"), async (req: any, res) => {
           quoteFeeBps: payload.quoteFeeBps ?? "0",
           timeInForce: payload.tif ?? "GTC",
           source: "AGENT",
+          preferredEngine,
         },
         prisma,
       );

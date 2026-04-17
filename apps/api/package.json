@@ -64,7 +64,8 @@
     "test:workers:reconciliation": "vitest run test/reconciliation.worker.test.ts",
     "test:lib:idempotency": "vitest run test/idempotency.lib.test.ts",
     "test:lib:time-in-force": "vitest run test/time-in-force.lib.test.ts",
-    "test:ledger:matching-determinism": "vitest run test/ledger.matching-determinism.test.ts"
+    "test:ledger:matching-determinism": "vitest run test/ledger.matching-determinism.test.ts",
+    "test:ledger:execution-cleanup": "vitest run test/ledger.execution.phase3-cleanup.test.ts"
   },
   "type": "commonjs"
 }

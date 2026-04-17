@@ -8,6 +8,7 @@ import {
   startReconciliationWorker,
   stopReconciliationWorker,
 } from "./workers/reconciliation";
+import { markRuntimeStarted, markRuntimeStopped } from "./lib/runtime/runtime-status";
 
 const PORT = Number(process.env.API_PORT ?? process.env.PORT ?? 4010);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -42,6 +43,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`[server] received ${signal}, shutting down`);
 
   stopReconciliationWorker();
+  markRuntimeStopped(signal);
 
   const closeServer = new Promise<void>((resolve) => {
     if (!server) {
@@ -80,6 +82,12 @@ async function main(): Promise<void> {
   if (reconEnabled) {
     startReconciliationWorker(RECON_INTERVAL_MS);
   }
+
+    markRuntimeStarted({
+      port: PORT,
+      reconciliationEnabled: reconEnabled,
+      reconciliationIntervalMs: RECON_INTERVAL_MS,
+    });
 }
 
 void main().catch((error) => {

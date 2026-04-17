@@ -19,7 +19,8 @@ import mandatesRoutes from "./routes/mandates";
 import marketRoutes from "./routes/market";
 import streamRoutes from "./routes/stream";
 import tradeRoutes from "./routes/trade"; import reconciliationRoutes from "./routes/reconciliation";
-import matchingEventsRoutes from "./routes/matching-events"; import ordersRoutes from "./routes/orders";
+import matchingEventsRoutes from "./routes/matching-events";
+import runtimeStatusRoutes from "./routes/runtime-status"; import ordersRoutes from "./routes/orders";
 
 const app = express();
 
@@ -163,5 +164,9 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 
 // ── Matching events stream routes ──────────────────────────
 app.use("/api/market/events", matchingEventsRoutes);
+
+
+// ── Runtime status routes ─────────────────────────────────
+app.use("/api/admin/runtime-status", runtimeStatusRoutes);
 
 export default app;

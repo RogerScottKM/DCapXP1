@@ -7,7 +7,9 @@ type MatchingEventType =
   | "ORDER_FILLED"
   | "ORDER_RESTED"
   | "ORDER_CANCELLED"
-  | "BOOK_DELTA";
+  | "BOOK_DELTA"
+  | "RUNTIME_STATUS"
+  | "RECONCILIATION_RESULT";
 
 export type MatchingEvent = {
   type: MatchingEventType;
@@ -15,7 +17,7 @@ export type MatchingEvent = {
   symbol: string;
   mode: string;
   engine: string;
-  source: "HUMAN" | "AGENT";
+  source: "HUMAN" | "AGENT" | "SYSTEM";
   payload: Record<string, unknown>;
 };
 
@@ -79,6 +81,10 @@ export function emitMatchingEvents(events: MatchingEvent[]): MatchingEventEnvelo
 
 export function listMatchingEvents(limit = 100): MatchingEventEnvelope[] {
   return matchingEvents.slice(-limit);
+}
+
+export function getMatchingEventCount(): number {
+  return matchingEvents.length;
 }
 
 export function subscribeMatchingEvents(listener: MatchingEventListener): () => void {

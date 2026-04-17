@@ -71,7 +71,8 @@
     "test:matching:in-memory-settlement": "vitest run test/in-memory-settlement-integration.test.ts",
     "test:matching:serialized-dispatch": "vitest run test/matching-serialized-dispatch.test.ts",
     "test:matching:events": "vitest run test/matching-events.test.ts",
-    "test:matching:stream": "vitest run test/matching-events.stream.test.ts"
+    "test:matching:stream": "vitest run test/matching-events.stream.test.ts",
+    "test:runtime:status": "vitest run test/runtime-status.lib.test.ts test/runtime-status.routes.test.ts"
   },
   "type": "commonjs"
 }

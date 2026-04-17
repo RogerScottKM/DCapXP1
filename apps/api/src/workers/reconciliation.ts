@@ -2,6 +2,7 @@ import { Decimal } from "@prisma/client/runtime/library";
 
 import { prisma } from "../lib/prisma";
 import { recordSecurityAudit } from "../lib/service/security-audit";
+import { noteReconciliationRun } from "../lib/runtime/runtime-status";
 
 export type ReconciliationResult = {
   check: string;
@@ -302,6 +303,7 @@ export async function runReconciliation(): Promise<ReconciliationResult[]> {
     console.log(`[reconciliation] all ${allResults.length} checks passed`);
   }
 
+  noteReconciliationRun(allResults);
   return allResults;
 }
 

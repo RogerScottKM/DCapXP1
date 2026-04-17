@@ -81,7 +81,7 @@ export async function submitLimitOrder(
       source: input.source,
       timeInForce: normalizedTimeInForce,
     });
-    emitMatchingEvents(events);
+    const emittedEvents = emitMatchingEvents(events);
 
     return {
       order,
@@ -91,7 +91,7 @@ export async function submitLimitOrder(
       engine: engineResult.engine,
       source: input.source,
       timeInForce: normalizedTimeInForce,
-      events,
+      events: emittedEvents,
     };
   });
 }

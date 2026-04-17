@@ -19,7 +19,15 @@ export type MatchingEvent = {
   payload: Record<string, unknown>;
 };
 
-const matchingEvents: MatchingEvent[] = [];
+export type MatchingEventEnvelope = MatchingEvent & {
+  id: number;
+};
+
+type MatchingEventListener = (event: MatchingEventEnvelope) => void;
+
+const matchingEvents: MatchingEventEnvelope[] = [];
+const listeners = new Set<MatchingEventListener>();
+let nextEventId = 1;
 
 function isZeroLike(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -49,20 +57,45 @@ function normalizeFillPayload(fill: any): Record<string, unknown> {
   };
 }
 
-export function emitMatchingEvent(event: MatchingEvent): void {
-  matchingEvents.push(event);
+export function emitMatchingEvent(event: MatchingEvent): MatchingEventEnvelope {
+  const envelope: MatchingEventEnvelope = {
+    ...event,
+    id: nextEventId++,
+  };
+  matchingEvents.push(envelope);
+  for (const listener of listeners) {
+    try {
+      listener(envelope);
+    } catch {
+      // listener failures must not break event publication
+    }
+  }
+  return envelope;
 }
 
-export function emitMatchingEvents(events: MatchingEvent[]): void {
-  matchingEvents.push(...events);
+export function emitMatchingEvents(events: MatchingEvent[]): MatchingEventEnvelope[] {
+  return events.map((event) => emitMatchingEvent(event));
 }
 
-export function listMatchingEvents(limit = 100): MatchingEvent[] {
+export function listMatchingEvents(limit = 100): MatchingEventEnvelope[] {
   return matchingEvents.slice(-limit);
+}
+
+export function subscribeMatchingEvents(listener: MatchingEventListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function getMatchingEventListenerCount(): number {
+  return listeners.size;
 }
 
 export function resetMatchingEventsForTests(): void {
   matchingEvents.length = 0;
+  listeners.clear();
+  nextEventId = 1;
 }
 
 export function buildMatchingEventsFromSubmission(input: {

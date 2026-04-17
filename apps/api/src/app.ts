@@ -18,7 +18,8 @@ import agentsRoutes from "./routes/agents";
 import mandatesRoutes from "./routes/mandates";
 import marketRoutes from "./routes/market";
 import streamRoutes from "./routes/stream";
-import tradeRoutes from "./routes/trade"; import reconciliationRoutes from "./routes/reconciliation"; import ordersRoutes from "./routes/orders";
+import tradeRoutes from "./routes/trade"; import reconciliationRoutes from "./routes/reconciliation";
+import matchingEventsRoutes from "./routes/matching-events"; import ordersRoutes from "./routes/orders";
 
 const app = express();
 
@@ -158,5 +159,9 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
     requestId,
   });
 });
+
+
+// ── Matching events stream routes ──────────────────────────
+app.use("/api/market/events", matchingEventsRoutes);
 
 export default app;

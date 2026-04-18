@@ -3,6 +3,7 @@ import express from "express";
 import {
   type MatchingEventEnvelope,
   listMatchingEvents,
+  listPersistedMatchingEvents,
   subscribeMatchingEvents,
 } from "../lib/matching/matching-events";
 
@@ -58,6 +59,28 @@ router.get("/stream", (req, res) => {
     unsubscribe();
     res.end();
   });
+});
+
+router.get("/replay", async (req, res) => {
+  const symbol = typeof req.query.symbol === "string" ? req.query.symbol : undefined;
+  const mode = typeof req.query.mode === "string" ? req.query.mode : undefined;
+  const afterEventId =
+    typeof req.query.afterEventId === "string" && req.query.afterEventId.length > 0
+      ? Number(req.query.afterEventId)
+      : undefined;
+  const limit =
+    typeof req.query.limit === "string" && req.query.limit.length > 0
+      ? Number(req.query.limit)
+      : 100;
+
+  const events = await listPersistedMatchingEvents({
+    symbol,
+    mode,
+    afterEventId: Number.isFinite(afterEventId) ? afterEventId : undefined,
+    limit: Number.isFinite(limit) ? limit : 100,
+  });
+
+  return res.json({ ok: true, events });
 });
 
 export default router;

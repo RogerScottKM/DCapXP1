@@ -28,3 +28,4 @@ Object.defineProperty(exports, "computeExecutedQuote", { enumerable: true, get: 
 Object.defineProperty(exports, "computeReservedQuote", { enumerable: true, get: function () { return hold_release_1.computeReservedQuote; } });
 Object.defineProperty(exports, "computeRemainingQtyFromCumulative", { enumerable: true, get: function () { return hold_release_1.computeRemainingQtyFromCumulative; } });
 Object.defineProperty(exports, "assertCumulativeFillWithinOrder", { enumerable: true, get: function () { return hold_release_1.assertCumulativeFillWithinOrder; } });
+__exportStar(require("./matching-priority"), exports);

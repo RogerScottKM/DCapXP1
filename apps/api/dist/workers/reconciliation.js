@@ -6,6 +6,8 @@ exports.stopReconciliationWorker = stopReconciliationWorker;
 const library_1 = require("@prisma/client/runtime/library");
 const prisma_1 = require("../lib/prisma");
 const security_audit_1 = require("../lib/service/security-audit");
+const runtime_status_1 = require("../lib/runtime/runtime-status");
+const alerting_1 = require("../lib/runtime/alerting");
 async function checkGlobalBalance() {
     const results = [];
     try {
@@ -258,6 +260,19 @@ async function runReconciliation() {
     }
     else {
         console.log(`[reconciliation] all ${allResults.length} checks passed`);
+    }
+    (0, runtime_status_1.noteReconciliationRun)(allResults);
+    const runtimeFailures = allResults.filter((result) => !result.ok);
+    if (runtimeFailures.length > 0) {
+        await (0, alerting_1.dispatchRuntimeAlert)({
+            type: "RECONCILIATION_FAILURE",
+            summary: `[reconciliation] ${runtimeFailures.length} check(s) failed`,
+            payload: {
+                failureCount: runtimeFailures.length,
+                checkCount: allResults.length,
+                failures: runtimeFailures.slice(0, 10),
+            },
+        }).catch(() => undefined);
     }
     return allResults;
 }

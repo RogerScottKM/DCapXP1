@@ -48,14 +48,14 @@ services:
       APP_CORS_ORIGINS: ${APP_CORS_ORIGINS:-http://localhost:3000}
       EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
       EMAIL_FROM: ${EMAIL_FROM:-DCapX <no-reply@dcapitalx.local>}
-      VAULT_ENABLED: ${VAULT_ENABLED:-false}
-      VAULT_ADDR: ${VAULT_ADDR:-}
-      VAULT_MOUNT_PATH: ${VAULT_MOUNT_PATH:-approle}
-      VAULT_ROLE_ID: ${VAULT_ROLE_ID:-}
-      VAULT_SECRET_ID: ${VAULT_SECRET_ID:-}
-      VAULT_SECRET_ID_FILE: ${VAULT_SECRET_ID_FILE:-}
-      VAULT_SECRET_PATH: ${VAULT_SECRET_PATH:-secret/data/dcapx/api}
-      VAULT_OVERRIDE_ENV: ${VAULT_OVERRIDE_ENV:-false}
+      VAULT_ENABLED: ${VAULT_ENABLED_API_CONTAINER:-false}
+      VAULT_ADDR: ${VAULT_ADDR_API_CONTAINER:-}
+      VAULT_MOUNT_PATH: ${VAULT_MOUNT_PATH_API_CONTAINER:-approle}
+      VAULT_ROLE_ID: ${VAULT_ROLE_ID_API_CONTAINER:-}
+      VAULT_SECRET_ID: ${VAULT_SECRET_ID_API_CONTAINER:-}
+      VAULT_SECRET_ID_FILE: ${VAULT_SECRET_ID_FILE_API_CONTAINER:-}
+      VAULT_SECRET_PATH: ${VAULT_SECRET_PATH_API_CONTAINER:-secret/data/dcapx/api-container}
+      VAULT_OVERRIDE_ENV: ${VAULT_OVERRIDE_ENV_API_CONTAINER:-true}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     depends_on:
       pg:
@@ -68,7 +68,7 @@ services:
     ports:
       - "127.0.0.1:4010:4010"
     working_dir: /app/apps/api
-    command: ["sh", "-lc", "pnpm prisma migrate deploy && pnpm start"]
+    command: ["sh", "-lc", "pnpm boot:vault"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4010/health || exit 1"]
       interval: 10s

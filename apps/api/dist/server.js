@@ -8,6 +8,7 @@ const app_1 = __importDefault(require("./app"));
 const bootstrap_secrets_1 = require("./lib/bootstrap-secrets");
 const prisma_1 = require("./lib/prisma");
 const reconciliation_1 = require("./workers/reconciliation");
+const runtime_status_1 = require("./lib/runtime/runtime-status");
 const PORT = Number(process.env.API_PORT ?? process.env.PORT ?? 4010);
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const RECON_INTERVAL_MS = Number(process.env.RECONCILIATION_INTERVAL_MS ?? (IS_PRODUCTION ? 60_000 : 300_000));
@@ -34,6 +35,7 @@ async function shutdown(signal) {
     shuttingDown = true;
     console.log(`[server] received ${signal}, shutting down`);
     (0, reconciliation_1.stopReconciliationWorker)();
+    (0, runtime_status_1.markRuntimeStopped)(signal);
     const closeServer = new Promise((resolve) => {
         if (!server) {
             resolve();
@@ -67,6 +69,11 @@ async function main() {
     if (reconEnabled) {
         (0, reconciliation_1.startReconciliationWorker)(RECON_INTERVAL_MS);
     }
+    (0, runtime_status_1.markRuntimeStarted)({
+        port: PORT,
+        reconciliationEnabled: reconEnabled,
+        reconciliationIntervalMs: RECON_INTERVAL_MS,
+    });
 }
 void main().catch((error) => {
     console.error("[server] startup failed", error);

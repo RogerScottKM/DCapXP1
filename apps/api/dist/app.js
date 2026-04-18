@@ -24,6 +24,9 @@ const market_1 = __importDefault(require("./routes/market"));
 const stream_1 = __importDefault(require("./routes/stream"));
 const trade_1 = __importDefault(require("./routes/trade"));
 const reconciliation_1 = __importDefault(require("./routes/reconciliation"));
+const matching_events_1 = __importDefault(require("./routes/matching-events"));
+const runtime_status_1 = __importDefault(require("./routes/runtime-status"));
+const admin_health_1 = __importDefault(require("./routes/admin-health"));
 const orders_1 = __importDefault(require("./routes/orders"));
 const app = (0, express_1.default)();
 const corsOrigins = (process.env.APP_CORS_ORIGINS ?? "http://localhost:3000")
@@ -143,4 +146,10 @@ app.use((err, req, res, _next) => {
         requestId,
     });
 });
+// ── Matching events stream routes ──────────────────────────
+app.use("/api/market/events", matching_events_1.default);
+// ── Runtime status routes ─────────────────────────────────
+app.use("/api/admin/runtime-status", runtime_status_1.default);
+// ── Admin health routes ───────────────────────────────────
+app.use("/api/admin/health", admin_health_1.default);
 exports.default = app;

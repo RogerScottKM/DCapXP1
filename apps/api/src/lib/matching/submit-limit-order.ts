@@ -7,7 +7,7 @@ import { ORDER_STATUS } from "../ledger/order-state";
 import type { MatchingEnginePort } from "./engine-port";
 import { selectMatchingEngine } from "./select-engine";
 import { buildSymbolModeKey, runSerializedByKey } from "./serialized-dispatch";
-import { buildMatchingEventsFromSubmission, emitMatchingEvents } from "./matching-events";
+import { buildMatchingEventsFromSubmission, emitMatchingEvents, persistMatchingEventEnvelopes } from "./matching-events";
 import { enforceAdmissionControls } from "./admission-controls";
 
 export type SubmitLimitOrderInput = {
@@ -91,6 +91,7 @@ await enforceAdmissionControls({
       timeInForce: normalizedTimeInForce,
     });
     const emittedEvents = emitMatchingEvents(events);
+    await persistMatchingEventEnvelopes(emittedEvents, tx as any);
 
     return {
       order,

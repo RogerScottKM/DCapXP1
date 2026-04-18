@@ -1436,3 +1436,18 @@ enum TimeInForce {
   FOK
   POST_ONLY
 }
+
+model MatchingEvent {
+  id        BigInt   @id @default(autoincrement())
+  eventId   Int      @unique
+  type      String
+  ts        DateTime
+  symbol    String
+  mode      String
+  engine    String
+  source    String
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([symbol, mode, eventId])
+}

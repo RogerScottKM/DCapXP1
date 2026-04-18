@@ -4,6 +4,7 @@ const express_1 = require("express");
 const client_1 = require("@prisma/client");
 const zod_1 = require("zod");
 const prisma_1 = require("../lib/prisma");
+const submit_limit_order_1 = require("../lib/matching/submit-limit-order");
 const ledger_1 = require("../lib/ledger");
 const order_state_1 = require("../lib/ledger/order-state");
 const ibac_1 = require("../middleware/ibac");
@@ -30,6 +31,9 @@ const fillSchema = zod_1.z.object({
 router.post("/orders", (0, ibac_1.enforceMandate)("TRADE"), async (req, res) => {
     try {
         const payload = orderSchema.parse(req.body);
+        const preferredEngine = process.env.ALLOW_IN_MEMORY_MATCHING === "true"
+            ? (req.get("x-matching-engine") ?? undefined)
+            : undefined;
         const limitPrice = payload.price;
         if (!limitPrice) {
             return res.status(400).json({ error: "LIMIT orders require price." });
@@ -44,35 +48,18 @@ router.post("/orders", (0, ibac_1.enforceMandate)("TRADE"), async (req, res) => 
         if (!payload.price) {
             return res.status(400).json({ error: "LIMIT orders require price." });
         }
-        const result = await prisma_1.prisma.$transaction(async (tx) => {
-            const order = await tx.order.create({
-                data: {
-                    symbol: payload.symbol,
-                    side: payload.side,
-                    price: new client_1.Prisma.Decimal(payload.price),
-                    qty: new client_1.Prisma.Decimal(payload.qty),
-                    status: "OPEN",
-                    mode: payload.mode,
-                    userId: principal.userId,
-                },
-            });
-            const ledgerReservation = await (0, ledger_1.reserveOrderOnPlacement)({
-                orderId: order.id,
-                userId: principal.userId,
-                symbol: payload.symbol,
-                side: payload.side,
-                qty: payload.qty,
-                price: payload.price,
-                mode: payload.mode,
-            }, tx);
-            const execution = await (0, ledger_1.executeLimitOrderAgainstBook)({
-                orderId: order.id,
-                quoteFeeBps: payload.quoteFeeBps ?? "0",
-            }, tx);
-            const orderReconciliation = await (0, ledger_1.reconcileOrderExecution)(order.id, tx);
-            const cumulativeFillCheck = await (0, ledger_1.reconcileCumulativeFills)(order.id, tx);
-            return { order, ledgerReservation, execution, orderReconciliation, cumulativeFillCheck };
-        });
+        const result = await (0, submit_limit_order_1.submitLimitOrder)({
+            userId: principal.userId,
+            symbol: payload.symbol,
+            side: payload.side,
+            price: payload.price,
+            qty: payload.qty,
+            mode: payload.mode,
+            quoteFeeBps: payload.quoteFeeBps ?? "0",
+            timeInForce: payload.tif ?? "GTC",
+            source: "AGENT",
+            preferredEngine,
+        }, prisma_1.prisma);
         await (0, ibac_1.bumpOrdersPlaced)(principal.mandateId ?? principal.mandate?.id);
         return res.json({ ok: true, ...result });
     }

@@ -16,8 +16,10 @@ const prisma_1 = require("../prisma");
 const accounts_1 = require("./accounts");
 const order_lifecycle_1 = require("./order-lifecycle");
 const order_state_1 = require("./order-state");
+const time_in_force_1 = require("./time-in-force");
 const reconciliation_1 = require("./reconciliation");
 const service_1 = require("./service");
+const matching_priority_1 = require("./matching-priority");
 const hold_release_1 = require("./hold-release");
 function toDecimal(value) {
     return value instanceof library_1.Decimal ? value : new library_1.Decimal(value);
@@ -67,10 +69,12 @@ async function syncOrderStatusFromTrades(orderId, db = prisma_1.prisma) {
     const order = await db.order.findUniqueOrThrow({ where: { id: normalizedId } });
     const executed = await getOrderExecutedQty(order.id, db);
     (0, order_state_1.assertExecutedQtyWithinOrder)(order.qty, executed);
+    const nextStatus = (0, order_state_1.deriveOrderStatus)(order.status, order.qty, executed);
+    (0, order_state_1.assertValidTransition)(order.status, nextStatus);
     return db.order.update({
         where: { id: order.id },
         data: {
-            status: (0, order_state_1.deriveOrderStatus)(order.status, order.qty, executed),
+            status: nextStatus,
         },
     });
 }
@@ -132,42 +136,60 @@ async function getMatchingOrders(order, db) {
         where: {
             symbol: order.symbol,
             mode: order.mode,
-            status: "OPEN",
+            status: { in: [order_state_1.ORDER_STATUS.OPEN, order_state_1.ORDER_STATUS.PARTIALLY_FILLED] },
             side: oppositeSide,
             NOT: { id: order.id },
         },
-        orderBy: order.side === "BUY"
-            ? [{ price: "asc" }, { createdAt: "asc" }]
-            : [{ price: "desc" }, { createdAt: "asc" }],
+        orderBy: (0, matching_priority_1.buildMakerOrderByForTaker)(order.side),
     });
     return candidates.filter((candidate) => isCrossingLimitOrder(order.side, order.price, candidate.price));
 }
 async function executeLimitOrderAgainstBook(input, db = prisma_1.prisma) {
     const orderId = BigInt(String(input.orderId));
     const takerOrder = await db.order.findUniqueOrThrow({ where: { id: orderId } });
-    if (takerOrder.status !== "OPEN") {
-        throw new Error("Only OPEN orders can be executed in the Phase 2D matching path.");
+    if (!(0, order_state_1.canReceiveFills)(takerOrder.status)) {
+        throw new Error(`Order ${takerOrder.id} cannot receive fills in status ${takerOrder.status}.`);
     }
     if (!takerOrder.price) {
-        throw new Error("Only LIMIT orders with a price can be executed in the Phase 2D matching path.");
+        throw new Error("Only LIMIT orders with a price can be executed.");
     }
+    const tif = (0, time_in_force_1.normalizeTimeInForce)(takerOrder.timeInForce);
     const matches = await getMatchingOrders(takerOrder, db);
+    if (tif === time_in_force_1.ORDER_TIF.POST_ONLY && matches.length > 0) {
+        (0, time_in_force_1.assertPostOnlyWouldRest)(takerOrder.side, takerOrder.price, matches[0]?.price ?? null);
+    }
+    if (tif === time_in_force_1.ORDER_TIF.FOK) {
+        let fillableLiquidity = new library_1.Decimal(0);
+        for (const m of matches) {
+            const freshMaker = await db.order.findUnique({ where: { id: m.id } });
+            if (!freshMaker || !(0, order_state_1.canReceiveFills)(freshMaker.status)) {
+                continue;
+            }
+            const mRemaining = await getOrderRemainingQty(freshMaker, db);
+            fillableLiquidity = fillableLiquidity.plus(mRemaining);
+        }
+        (0, time_in_force_1.assertFokCanFullyFill)(takerOrder.qty, fillableLiquidity);
+    }
     const fills = [];
     let remaining = await getOrderRemainingQty(takerOrder, db);
     for (const makerOrder of matches) {
         if (remaining.lessThanOrEqualTo(0)) {
             break;
         }
-        const makerRemaining = await getOrderRemainingQty(makerOrder, db);
+        const freshMaker = await db.order.findUnique({ where: { id: makerOrder.id } });
+        if (!freshMaker || !(0, order_state_1.canReceiveFills)(freshMaker.status)) {
+            continue;
+        }
+        const makerRemaining = await getOrderRemainingQty(freshMaker, db);
         if (makerRemaining.lessThanOrEqualTo(0)) {
             continue;
         }
         const fillQty = minDecimal(remaining, makerRemaining);
-        const executionPrice = new library_1.Decimal(makerOrder.price);
+        const executionPrice = new library_1.Decimal(freshMaker.price);
         const grossQuote = fillQty.mul(executionPrice);
         const quoteFee = computeQuoteFeeAmount(grossQuote, input.quoteFeeBps ?? 0);
-        const buyOrder = takerOrder.side === "BUY" ? takerOrder : makerOrder;
-        const sellOrder = takerOrder.side === "SELL" ? takerOrder : makerOrder;
+        const buyOrder = takerOrder.side === "BUY" ? takerOrder : freshMaker;
+        const sellOrder = takerOrder.side === "SELL" ? takerOrder : freshMaker;
         const trade = await db.trade.create({
             data: {
                 symbol: takerOrder.symbol,
@@ -209,12 +231,33 @@ async function executeLimitOrderAgainstBook(input, db = prisma_1.prisma) {
         });
         remaining = remaining.minus(fillQty);
     }
+    const executed = await getOrderExecutedQty(takerOrder.id, db);
+    const tifAction = (0, time_in_force_1.deriveTifRestingAction)(tif, executed, takerOrder.qty);
+    if (tifAction === "CANCEL_REMAINDER" && remaining.greaterThan(0)) {
+        await (0, order_lifecycle_1.releaseOrderOnCancel)({
+            orderId: takerOrder.id,
+            userId: takerOrder.userId,
+            symbol: takerOrder.symbol,
+            side: takerOrder.side,
+            qty: remaining,
+            price: takerOrder.price,
+            mode: takerOrder.mode,
+            reason: "CANCEL",
+        }, db);
+        const currentDerivedStatus = (0, order_state_1.deriveOrderStatus)(takerOrder.status, takerOrder.qty, executed);
+        (0, order_state_1.assertValidTransition)(currentDerivedStatus, order_state_1.ORDER_STATUS.CANCELLED);
+        await db.order.update({
+            where: { id: takerOrder.id },
+            data: { status: order_state_1.ORDER_STATUS.CANCELLED },
+        });
+    }
     const refreshedOrder = await db.order.findUniqueOrThrow({ where: { id: takerOrder.id } });
     const refreshedRemaining = await getOrderRemainingQty(refreshedOrder, db);
     return {
         order: refreshedOrder,
         fills,
         remainingQty: refreshedRemaining.toString(),
+        tifAction,
     };
 }
 async function reconcileOrderExecution(orderId, db = prisma_1.prisma) {

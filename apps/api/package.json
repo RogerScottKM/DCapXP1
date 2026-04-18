@@ -75,7 +75,16 @@
     "test:runtime:status": "vitest run test/runtime-status.lib.test.ts test/runtime-status.routes.test.ts",
     "test:matching:admission-controls": "vitest run test/admission-controls.test.ts",
     "test:runtime:health": "vitest run test/runtime-alerting.lib.test.ts test/admin-health.routes.test.ts",
-    "test:matching:property-invariants": "vitest run test/matching.property-invariants.test.ts"
+    "test:matching:property-invariants": "vitest run test/matching.property-invariants.test.ts",
+    "test:matching:durable-events": "vitest run test/matching-events.persistence.test.ts test/matching-events.replay.routes.test.ts",
+    "vault:exec": "node dist/scripts/vault-exec.js",
+    "prisma:migrate:vault": "pnpm build && node dist/scripts/vault-exec.js pnpm prisma migrate deploy",
+    "start:vault": "pnpm build && node dist/scripts/vault-exec.js node dist/server.js",
+    "boot:vault": "node dist/scripts/vault-exec.js sh -lc \"pnpm prisma migrate deploy && node dist/server.js\"",
+    "test:vault-exec": "vitest run test/vault-exec.script.test.ts",
+    "vault:verify": "pnpm build && node dist/scripts/print-vault-context.js",
+    "test:vault-context": "vitest run test/vault-context.script.test.ts",
+    "test:vault-auto-bootstrap": "vitest run test/vault-auto-bootstrap.test.ts"
   },
   "type": "commonjs"
 }

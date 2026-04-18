@@ -1,4 +1,7 @@
+import { Prisma, type PrismaClient } from "@prisma/client";
 import { Decimal } from "@prisma/client/runtime/library";
+
+import { prisma } from "../prisma";
 
 type MatchingEventType =
   | "ORDER_ACCEPTED"
@@ -26,6 +29,7 @@ export type MatchingEventEnvelope = MatchingEvent & {
 };
 
 type MatchingEventListener = (event: MatchingEventEnvelope) => void;
+type PersistDb = PrismaClient | Prisma.TransactionClient | any;
 
 const matchingEvents: MatchingEventEnvelope[] = [];
 const listeners = new Set<MatchingEventListener>();
@@ -59,6 +63,19 @@ function normalizeFillPayload(fill: any): Record<string, unknown> {
   };
 }
 
+function toEnvelope(record: any): MatchingEventEnvelope {
+  return {
+    id: Number(record.eventId),
+    type: record.type,
+    ts: record.ts instanceof Date ? record.ts.toISOString() : String(record.ts),
+    symbol: String(record.symbol),
+    mode: String(record.mode),
+    engine: String(record.engine),
+    source: record.source as MatchingEvent["source"],
+    payload: (record.payload ?? {}) as Record<string, unknown>,
+  };
+}
+
 export function emitMatchingEvent(event: MatchingEvent): MatchingEventEnvelope {
   const envelope: MatchingEventEnvelope = {
     ...event,
@@ -77,6 +94,69 @@ export function emitMatchingEvent(event: MatchingEvent): MatchingEventEnvelope {
 
 export function emitMatchingEvents(events: MatchingEvent[]): MatchingEventEnvelope[] {
   return events.map((event) => emitMatchingEvent(event));
+}
+
+export async function persistMatchingEventEnvelope(
+  envelope: MatchingEventEnvelope,
+  db: PersistDb = prisma,
+): Promise<MatchingEventEnvelope> {
+  const record = await db.matchingEvent.upsert({
+    where: { eventId: envelope.id },
+    update: {
+      type: envelope.type,
+      ts: new Date(envelope.ts),
+      symbol: envelope.symbol,
+      mode: envelope.mode,
+      engine: envelope.engine,
+      source: envelope.source,
+      payload: envelope.payload as any,
+    },
+    create: {
+      eventId: envelope.id,
+      type: envelope.type,
+      ts: new Date(envelope.ts),
+      symbol: envelope.symbol,
+      mode: envelope.mode,
+      engine: envelope.engine,
+      source: envelope.source,
+      payload: envelope.payload as any,
+    },
+  });
+
+  return toEnvelope(record);
+}
+
+export async function persistMatchingEventEnvelopes(
+  envelopes: MatchingEventEnvelope[],
+  db: PersistDb = prisma,
+): Promise<MatchingEventEnvelope[]> {
+  const persisted: MatchingEventEnvelope[] = [];
+  for (const envelope of envelopes) {
+    persisted.push(await persistMatchingEventEnvelope(envelope, db));
+  }
+  return persisted;
+}
+
+export async function listPersistedMatchingEvents(
+  input: {
+    afterEventId?: number | null;
+    symbol?: string | null;
+    mode?: string | null;
+    limit?: number;
+  } = {},
+  db: PersistDb = prisma,
+): Promise<MatchingEventEnvelope[]> {
+  const records = await db.matchingEvent.findMany({
+    where: {
+      ...(input.afterEventId != null ? { eventId: { gt: input.afterEventId } } : {}),
+      ...(input.symbol ? { symbol: input.symbol } : {}),
+      ...(input.mode ? { mode: input.mode } : {}),
+    },
+    orderBy: { eventId: "asc" },
+    take: input.limit ?? 100,
+  });
+
+  return records.map(toEnvelope);
 }
 
 export function listMatchingEvents(limit = 100): MatchingEventEnvelope[] {

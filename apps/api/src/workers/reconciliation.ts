@@ -3,6 +3,7 @@ import { Decimal } from "@prisma/client/runtime/library";
 import { prisma } from "../lib/prisma";
 import { recordSecurityAudit } from "../lib/service/security-audit";
 import { noteReconciliationRun } from "../lib/runtime/runtime-status";
+import { dispatchRuntimeAlert } from "../lib/runtime/alerting";
 
 export type ReconciliationResult = {
   check: string;
@@ -304,6 +305,19 @@ export async function runReconciliation(): Promise<ReconciliationResult[]> {
   }
 
   noteReconciliationRun(allResults);
+const runtimeFailures = allResults.filter((result) => !result.ok);
+if (runtimeFailures.length > 0) {
+  await dispatchRuntimeAlert({
+    type: "RECONCILIATION_FAILURE",
+    summary: `[reconciliation] ${runtimeFailures.length} check(s) failed`,
+    payload: {
+      failureCount: runtimeFailures.length,
+      checkCount: allResults.length,
+      failures: runtimeFailures.slice(0, 10),
+    },
+  }).catch(() => undefined);
+}
+
   return allResults;
 }
 

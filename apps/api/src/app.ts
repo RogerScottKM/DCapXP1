@@ -20,7 +20,8 @@ import marketRoutes from "./routes/market";
 import streamRoutes from "./routes/stream";
 import tradeRoutes from "./routes/trade"; import reconciliationRoutes from "./routes/reconciliation";
 import matchingEventsRoutes from "./routes/matching-events";
-import runtimeStatusRoutes from "./routes/runtime-status"; import ordersRoutes from "./routes/orders";
+import runtimeStatusRoutes from "./routes/runtime-status";
+import adminHealthRoutes from "./routes/admin-health"; import ordersRoutes from "./routes/orders";
 
 const app = express();
 
@@ -168,5 +169,9 @@ app.use("/api/market/events", matchingEventsRoutes);
 
 // ── Runtime status routes ─────────────────────────────────
 app.use("/api/admin/runtime-status", runtimeStatusRoutes);
+
+
+// ── Admin health routes ───────────────────────────────────
+app.use("/api/admin/health", adminHealthRoutes);
 
 export default app;

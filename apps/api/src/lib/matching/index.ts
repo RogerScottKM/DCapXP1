@@ -6,3 +6,4 @@ export * from "./in-memory-matching-engine";
 export * from "./select-engine";
 export * from "./serialized-dispatch";
 export * from "./matching-events";
+export * from "./admission-controls";

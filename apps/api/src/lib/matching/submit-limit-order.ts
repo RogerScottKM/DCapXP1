@@ -8,6 +8,7 @@ import type { MatchingEnginePort } from "./engine-port";
 import { selectMatchingEngine } from "./select-engine";
 import { buildSymbolModeKey, runSerializedByKey } from "./serialized-dispatch";
 import { buildMatchingEventsFromSubmission, emitMatchingEvents } from "./matching-events";
+import { enforceAdmissionControls } from "./admission-controls";
 
 export type SubmitLimitOrderInput = {
   userId: string;
@@ -31,6 +32,14 @@ export async function submitLimitOrder(
   const selectedEngine = engine ?? selectMatchingEngine(input.preferredEngine as any);
 
   return db.$transaction(async (tx) => {
+await enforceAdmissionControls({
+  db: tx as any,
+  userId: input.userId,
+  symbol: input.symbol,
+  mode: String(input.mode),
+  price: input.price,
+});
+
     const order = await tx.order.create({
       data: {
         symbol: input.symbol,

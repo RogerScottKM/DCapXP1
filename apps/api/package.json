@@ -72,7 +72,8 @@
     "test:matching:serialized-dispatch": "vitest run test/matching-serialized-dispatch.test.ts",
     "test:matching:events": "vitest run test/matching-events.test.ts",
     "test:matching:stream": "vitest run test/matching-events.stream.test.ts",
-    "test:runtime:status": "vitest run test/runtime-status.lib.test.ts test/runtime-status.routes.test.ts"
+    "test:runtime:status": "vitest run test/runtime-status.lib.test.ts test/runtime-status.routes.test.ts",
+    "test:matching:admission-controls": "vitest run test/admission-controls.test.ts"
   },
   "type": "commonjs"
 }

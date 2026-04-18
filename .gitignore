@@ -16,3 +16,5 @@ secrets/
 # ─── Docker compose backups (use git branches instead) ───
 docker-compose-backup*.yml
 docker-compose.yml.bak*
+.env.vault.host
+.env.vault.container

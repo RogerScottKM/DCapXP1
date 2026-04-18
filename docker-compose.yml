@@ -1,4 +1,19 @@
 services:
+  vault:
+    image: hashicorp/vault:1.19
+    cap_add:
+      - IPC_LOCK
+    command: ["vault", "server", "-config=/vault/config/vault.hcl"]
+    ports:
+      - "127.0.0.1:8200:8200"
+    volumes:
+      - ./infra/vault/config:/vault/config:ro
+      - dcapx_vault:/vault/data
+      - dcapx_vault_file:/vault/file
+    networks:
+      - app
+    restart: unless-stopped
+
   pg:
     image: postgres:16
     environment:
@@ -56,6 +71,7 @@ services:
       VAULT_SECRET_ID_FILE: ${VAULT_SECRET_ID_FILE_API_CONTAINER:-}
       VAULT_SECRET_PATH: ${VAULT_SECRET_PATH_API_CONTAINER:-secret/data/dcapx/api-container}
       VAULT_OVERRIDE_ENV: ${VAULT_OVERRIDE_ENV_API_CONTAINER:-true}
+      VAULT_BOOTSTRAP_FILE: /run/secrets/dcapx-api-container.env
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     depends_on:
       pg:
@@ -68,6 +84,9 @@ services:
     ports:
       - "127.0.0.1:4010:4010"
     working_dir: /app/apps/api
+    volumes:
+      - ./.env.vault.container:/run/secrets/dcapx-api-container.env:ro
+      - ${HOME}/.dcapx-vault/api-container.secret-id:/run/secrets/dcapx-api-container.secret-id:ro
     command: ["sh", "-lc", "pnpm boot:vault"]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4010/health || exit 1"]
@@ -108,6 +127,8 @@ services:
 volumes:
   dcapx_pg:
   dcapx_redis:
+  dcapx_vault:
+  dcapx_vault_file:
 
 networks:
   public: {}
